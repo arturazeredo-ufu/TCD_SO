@@ -55,15 +55,16 @@ int main(){
 	int id = criaFilhos();	
 
 	if ( id <= 3 ){
-		if (id == 1) {
-			signal(SIGUSR2, p1p2p3Produtor);
-			p1p2p3Produtor(id);
-			pause();
-		} else {
-			p1p2p3Produtor(id);
-		}
+		signal(SIGUSR2, p1p2p3Produtor);
+		pause();
 	}
 	else if ( id == 4 ){
+		if (shared_area_ptr->queue[0] == 0) {
+			for (int i=1; i<4; i++) {
+				sleep(5);
+				while(kill(shared_area_ptr->pids[i], SIGUSR2) == -1);	
+			}
+		}
 		signal(SIGUSR1, p4CriaThread);
 		pause();
 	}
@@ -89,8 +90,6 @@ int main(){
 	close(pipe01[1]);
 	close(pipe02[0]);
 	close(pipe02[1]);
-
-	printf("Sai %d\n", getpid());
 
 	exit(0); 
 }
@@ -143,10 +142,11 @@ int criaFilhos() {
 			break;
 		}
 		shared_area_ptr->pids[id] = p; 
-		printf("id: %d\tpid: %d\n", id, shared_area_ptr->pids[id]);
+		// printf("id: %d\tpid: %d\n", id, shared_area_ptr->pids[id]);
 	}
 
 	if(p > 0) {
+		printf("\n");
 		for (int i = 0; i < 8; ++i) 
 			sem_post((sem_t*)&shared_area_ptr->sync);
 		for (int i = 0; i < 7; i++) 
@@ -162,6 +162,7 @@ void p1p2p3Produtor(int id) {
 		sem_wait((sem_t*)&shared_area_ptr->mutex);
 		if (shared_area_ptr->num <= 9) {
 			shared_area_ptr->queue[shared_area_ptr->num] = rand()%1000;
+			printf("pid:%d\tinseriu:%d\tpos:%d\n", getpid(), shared_area_ptr->queue[shared_area_ptr->num], shared_area_ptr->num);
 			shared_area_ptr->num++;
 			if (shared_area_ptr->num == 9) {
 				sleep(000.5);
@@ -178,15 +179,15 @@ void p1p2p3Produtor(int id) {
 }
 
 void p4CriaThread() {
+	printaFila();
 	shared_area_ptr->num = 0;
+
 	int thread1id = gettid();
 
 	pthread_t thread2;
 	pthread_create(&thread2, NULL, p4Consumidor, &thread1id);
 	p4Consumidor(&thread1id);
 	pthread_join(thread2, NULL);
-	
-	while(kill(shared_area_ptr->pids[1], SIGUSR2) == -1);
 }
 
 void* p4Consumidor(void * thread1IdPointer) {
@@ -197,12 +198,10 @@ void* p4Consumidor(void * thread1IdPointer) {
 		sem_wait((sem_t*)&shared_area_ptr->mutex);
 	
 		if (shared_area_ptr->num <= 9) {
-
-			if (gettid() == *thread1Id) {
+			if (gettid() == *thread1Id)
 				write(pipe01[1], &shared_area_ptr->queue[shared_area_ptr->num], sizeof(int));
-			} else {
+			else
 				write(pipe02[1], &shared_area_ptr->queue[shared_area_ptr->num], sizeof(int));
-			}
 			
 			shared_area_ptr->queue[shared_area_ptr->num] = 0;
 			shared_area_ptr->num++;
