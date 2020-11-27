@@ -24,27 +24,39 @@ struct shared_area{
 };
 
 struct shared_area *shared_area_ptr;
+int pipe01[2];
+int pipe02[2];
 
-int criaFilhos();
+int    criaFilhos();
 struct shared_area * criaFila1();
-void  inicializarFila1();
-void  inicializaSemaforo(sem_t * semaforo);
-void  p1p2p3Produtor(int id);
-void* p4Consumidor(void * arg);
-void  p4CriaThread();
-void teste();
+void   inicializarFila1();
+void   p1p2p3Produtor(int id);
+void*  p4Consumidor(void * thread1Id);
+void   p4CriaThread();
+void   teste();
+
+void printaFila(void) {
+	int i;
+	for (i=0;i<10;++i) {
+		printf("%d ", shared_area_ptr->queue[i]	);	
+	}
+	printf("\n\n");
+}
 
 int main(){
 	criaFila1(9827);
 	
-	inicializaSemaforo((sem_t *)&shared_area_ptr->mutex);
-	inicializaSemaforo((sem_t *)&shared_area_ptr->sync);
+	if ( sem_init((sem_t *)&shared_area_ptr->mutex,1,1) != 0 ) {printf("mutex falhou\n");exit(-1);}
+	if ( sem_init((sem_t *)&shared_area_ptr->sync,1,1) != 0 )  {printf("sync falhou\n" );exit(-1);}
+
+	if ( pipe(pipe01) == -1 ){ printf("Erro pipe()"); return -1; }
+	if ( pipe(pipe02) == -1 ){ printf("Erro pipe()"); return -1; }
 
 	int id = criaFilhos();	
 
 	if ( id <= 3 ){
 		if (id == 1) {
-			signal(SIGUSR2, teste);
+			signal(SIGUSR2, p1p2p3Produtor);
 			p1p2p3Produtor(id);
 			pause();
 		} else {
@@ -61,9 +73,6 @@ int main(){
 	}
 	else if ( id == 7 ){
 	}
-	else if ( id == 8 ){
-	}
-	
 	exit(0); 
 }
 
@@ -100,13 +109,6 @@ void  inicializarFila1() {
 	shared_area_ptr->num=0;
 }
 
-void  inicializaSemaforo(sem_t * semaforo) {
-	if ( sem_init(semaforo,1,1) != 0 ) {
-		printf("sem_init mutex falhou\n");
-		exit(-1);
-	}
-}
-
 int criaFilhos() {
 	pid_t p;
 	int id=0;
@@ -122,7 +124,7 @@ int criaFilhos() {
 			break;
 		}
 		shared_area_ptr->pids[id] = p; 
-		printf("id: %d\tpid: %d\n", id, shared_area_ptr->pids[id]);
+		// printf("id: %d\tpid: %d\n", id, shared_area_ptr->pids[id]);
 	}
 
 	if(p > 0) {
@@ -159,23 +161,37 @@ void p1p2p3Produtor(int id) {
 }
 
 void p4CriaThread() {
+	printaFila();
 	shared_area_ptr->num = 0;
+	int thread1id = gettid();
+
 	pthread_t thread2;
-	pthread_create(&thread2, NULL, p4Consumidor, NULL);
-	p4Consumidor(NULL);
+	pthread_create(&thread2, NULL, p4Consumidor, &thread1id);
+	p4Consumidor(&thread1id);
 	pthread_join(thread2, NULL);
+	
 	while(kill(shared_area_ptr->pids[1], SIGUSR2) == -1);
-	exit(0);
 }
 
-void* p4Consumidor(void * arg) {
+void* p4Consumidor(void * thread1IdPointer) {
+	int *thread1Id = (int *)thread1IdPointer;
 	while (shared_area_ptr->num <= 9) {
 		sem_wait((sem_t*)&shared_area_ptr->mutex);
 		if (shared_area_ptr->num < 9) {
+			if (gettid() == *thread1Id) {
+				write(pipe01[1], &shared_area_ptr->queue[shared_area_ptr->num], sizeof(int));
+			} else {
+				write(pipe02[1], &shared_area_ptr->queue[shared_area_ptr->num], sizeof(int));
+			}
 			shared_area_ptr->num++;
 			sem_post((sem_t*)&shared_area_ptr->mutex);
 		} 
 		else if (shared_area_ptr->num == 9){
+			if (gettid() == *thread1Id) {
+				write(pipe01[1], &shared_area_ptr->queue[shared_area_ptr->num], sizeof(int));
+			} else {
+				write(pipe02[1], &shared_area_ptr->queue[shared_area_ptr->num], sizeof(int));
+			}
 			shared_area_ptr->num++;
 			sem_post((sem_t*)&shared_area_ptr->mutex);
 			break;
@@ -186,9 +202,9 @@ void* p4Consumidor(void * arg) {
 	}
 }
 
-void teste() {
-	write(STDOUT_FILENO, "pode começar de novo\n", 22);
-	sem_post((sem_t*)&shared_area_ptr->mutex);
-	exit(0);
-}
+// void teste() {
+// 	write(STDOUT_FILENO, "pode começar de novo\n", 22);
+// 	sem_post((sem_t*)&shared_area_ptr->mutex);
+// 	exit(0);
+// }
 
