@@ -37,10 +37,13 @@ void   teste();
 
 void printaFila(void) {
 	int i;
-	for (i=0;i<10;++i) {
-		printf("%d ", shared_area_ptr->queue[i]	);	
+	printf("[");
+	for (i=0;i<QUEUE_SZ;++i) {
+		printf("%d", shared_area_ptr->queue[i]);
+		if(i != QUEUE_SZ-1)
+			printf(", ");	
 	}
-	printf("\n\n");
+	printf("]\n");
 }
 
 int main(){
@@ -157,24 +160,31 @@ void p1p2p3Produtor() {
 	srand(getpid() + shared_area_ptr->num);
 	sem_wait((sem_t*)&shared_area_ptr->mutex);
 	if (shared_area_ptr->num < 9) {
+
 		shared_area_ptr->queue[shared_area_ptr->num] = rand()%1000;
 		printf("pid:%d, valor:%d, %d\n", getpid(), shared_area_ptr->queue[shared_area_ptr->num], shared_area_ptr->num);
 		shared_area_ptr->num++;
+		
 		sem_post((sem_t*)&shared_area_ptr->mutex);
 		p1p2p3Produtor();
+	
 	} else if (shared_area_ptr->num == 9) {
+	
 		shared_area_ptr->queue[shared_area_ptr->num] = rand()%1000;
 		printf("pid:%d, valor:%d, %d\n", getpid(), shared_area_ptr->queue[shared_area_ptr->num], shared_area_ptr->num);
 		shared_area_ptr->num++;
+	
 		sleep(000.5);
 		while(kill(shared_area_ptr->pids[4], SIGUSR1) == -1);
 		sem_post((sem_t*)&shared_area_ptr->mutex);
+	
 	} else {
 		sem_post((sem_t*)&shared_area_ptr->mutex);
 	}
 }
 
 void p4CriaThread() {
+	printf("\n");
 	printaFila();
 	shared_area_ptr->num = 0;
 
