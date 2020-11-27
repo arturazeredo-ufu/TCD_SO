@@ -178,7 +178,6 @@ void p1p2p3Produtor(int id) {
 }
 
 void p4CriaThread() {
-	printaFila();
 	shared_area_ptr->num = 0;
 	int thread1id = gettid();
 
@@ -205,6 +204,7 @@ void* p4Consumidor(void * thread1IdPointer) {
 				write(pipe02[1], &shared_area_ptr->queue[shared_area_ptr->num], sizeof(int));
 			}
 			
+			shared_area_ptr->queue[shared_area_ptr->num] = 0;
 			shared_area_ptr->num++;
 			
 			sem_post((sem_t*)&shared_area_ptr->mutex);
