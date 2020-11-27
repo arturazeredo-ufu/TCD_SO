@@ -160,18 +160,16 @@ void p1p2p3Produtor(int id) {
 	srand(getpid());
 	while (shared_area_ptr->num <= 9) {
 		sem_wait((sem_t*)&shared_area_ptr->mutex);
-		if (shared_area_ptr->num < 9) {
+		if (shared_area_ptr->num <= 9) {
 			shared_area_ptr->queue[shared_area_ptr->num] = rand()%1000;
 			shared_area_ptr->num++;
+			if (shared_area_ptr->num == 9) {
+				sleep(000.5);
+				while(kill(shared_area_ptr->pids[4], SIGUSR1) == -1);
+				sem_post((sem_t*)&shared_area_ptr->mutex);
+				break;
+			}
 			sem_post((sem_t*)&shared_area_ptr->mutex);
-		} 
-		else if (shared_area_ptr->num == 9){
-			shared_area_ptr->queue[shared_area_ptr->num] = rand()%1000;
-			shared_area_ptr->num++;
-			sleep(000.5);
-			while(kill(shared_area_ptr->pids[4], SIGUSR1) == -1);
-			sem_post((sem_t*)&shared_area_ptr->mutex);
-			break;
 		} else {
 			sem_post((sem_t*)&shared_area_ptr->mutex);
 			break; 
@@ -194,26 +192,24 @@ void p4CriaThread() {
 
 void* p4Consumidor(void * thread1IdPointer) {
 	int *thread1Id = (int *)thread1IdPointer;
+	
 	while (shared_area_ptr->num <= 9) {
+	
 		sem_wait((sem_t*)&shared_area_ptr->mutex);
-		if (shared_area_ptr->num < 9) {
+	
+		if (shared_area_ptr->num <= 9) {
+
 			if (gettid() == *thread1Id) {
 				write(pipe01[1], &shared_area_ptr->queue[shared_area_ptr->num], sizeof(int));
 			} else {
 				write(pipe02[1], &shared_area_ptr->queue[shared_area_ptr->num], sizeof(int));
 			}
+			
 			shared_area_ptr->num++;
+			
 			sem_post((sem_t*)&shared_area_ptr->mutex);
-		} 
-		else if (shared_area_ptr->num == 9){
-			if (gettid() == *thread1Id) {
-				write(pipe01[1], &shared_area_ptr->queue[shared_area_ptr->num], sizeof(int));
-			} else {
-				write(pipe02[1], &shared_area_ptr->queue[shared_area_ptr->num], sizeof(int));
-			}
-			shared_area_ptr->num++;
-			sem_post((sem_t*)&shared_area_ptr->mutex);
-			break;
+			if (shared_area_ptr->num == 9)
+				break;	
 		} else {
 			sem_post((sem_t*)&shared_area_ptr->mutex);
 			break; 
