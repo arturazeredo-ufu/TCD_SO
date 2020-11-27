@@ -37,7 +37,7 @@ void   teste();
 
 void printaFila(void) {
 	int i;
-	printf("[");
+	printf("\nF1:\n[");
 	for (i=0;i<QUEUE_SZ;++i) {
 		printf("%d", shared_area_ptr->queue[i]);
 		if(i != QUEUE_SZ-1)
@@ -63,8 +63,10 @@ int main(){
 	}
 	else if ( id == 4 ){
 		if (shared_area_ptr->num == 0) 
-			for (int i=1; i<4; i++)
+			for (int i=1; i<4; i++){
+				sleep(0.5);
 				while(kill(shared_area_ptr->pids[i], SIGUSR2) == -1);
+			}
 		signal(SIGUSR1, p4CriaThread);
 		pause();
 	}
@@ -128,6 +130,7 @@ void  inicializarFila1() {
 }
 
 int criaFilhos() {
+	printf("Criacao dos processos filhos:\n");
 	pid_t p;
 	int id=0;
 	sem_wait((sem_t*)&shared_area_ptr->sync);
@@ -162,7 +165,7 @@ void p1p2p3Produtor() {
 	if (shared_area_ptr->num < 9) {
 
 		shared_area_ptr->queue[shared_area_ptr->num] = rand()%1000;
-		printf("pid:%d, valor:%d, %d\n", getpid(), shared_area_ptr->queue[shared_area_ptr->num], shared_area_ptr->num);
+		printf("%d insere %d na posicao %d\n", getpid(), shared_area_ptr->queue[shared_area_ptr->num], shared_area_ptr->num);
 		shared_area_ptr->num++;
 		
 		sem_post((sem_t*)&shared_area_ptr->mutex);
@@ -171,10 +174,10 @@ void p1p2p3Produtor() {
 	} else if (shared_area_ptr->num == 9) {
 	
 		shared_area_ptr->queue[shared_area_ptr->num] = rand()%1000;
-		printf("pid:%d, valor:%d, %d\n", getpid(), shared_area_ptr->queue[shared_area_ptr->num], shared_area_ptr->num);
+		printf("%d insere %d na posicao %d\n", getpid(), shared_area_ptr->queue[shared_area_ptr->num], shared_area_ptr->num);
 		shared_area_ptr->num++;
 	
-		sleep(000.5);
+		sleep(0.5);
 		while(kill(shared_area_ptr->pids[4], SIGUSR1) == -1);
 		sem_post((sem_t*)&shared_area_ptr->mutex);
 	
@@ -184,7 +187,6 @@ void p1p2p3Produtor() {
 }
 
 void p4CriaThread() {
-	printf("\n");
 	printaFila();
 	shared_area_ptr->num = 0;
 
@@ -205,6 +207,7 @@ void* p4Consumidor(void * thread1IdPointer) {
 	
 		if (shared_area_ptr->num <= 9) {
 			if (gettid() == *thread1Id)
+				// printf("%s\n", );
 				write(pipe01[1], &shared_area_ptr->queue[shared_area_ptr->num], sizeof(int));
 			else
 				write(pipe02[1], &shared_area_ptr->queue[shared_area_ptr->num], sizeof(int));
