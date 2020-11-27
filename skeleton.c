@@ -4,12 +4,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/shm.h>
+#include <sys/syscall.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <threads.h>
 #include <time.h>
 #include <unistd.h>
 
+#define gettid() syscall(SYS_gettid)
 #define MEM_SZ   140
 #define QUEUE_SZ 10
 
@@ -153,7 +155,7 @@ void p1p2p3Produtor(int id) {
 }
 
 void p4CriaThread() {
-	printf("p4CriaThread\n");
+	shared_area_ptr->num = 0;
 	int i;
 	for(i=0; i<10; i++) {
 		printf("%d ", shared_area_ptr->queue[i]);
@@ -163,10 +165,24 @@ void p4CriaThread() {
 	pthread_create(&thread2, NULL, p4Consumidor, NULL);
 	p4Consumidor(NULL);
 	pthread_join(thread2, NULL);
+	printf("finalizamo\n");
 	exit(0);
 }
 
 void* p4Consumidor(void * arg) {
-	printf("p4Consumidor\n");
-	return NULL;
+	while (shared_area_ptr->num <= 9) {
+		sem_wait((sem_t*)&shared_area_ptr->mutex);
+		if (shared_area_ptr->num < 9) {
+			shared_area_ptr->num++;
+			sem_post((sem_t*)&shared_area_ptr->mutex);
+		} 
+		else if (shared_area_ptr->num == 9){
+			shared_area_ptr->num++;
+			sem_post((sem_t*)&shared_area_ptr->mutex);
+			break;
+		} else {
+			sem_post((sem_t*)&shared_area_ptr->mutex);
+			break; 
+		}
+	}
 }
