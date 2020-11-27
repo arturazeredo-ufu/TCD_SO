@@ -68,11 +68,30 @@ int main(){
 		pause();
 	}
 	else if ( id == 5 ){
+		// int y;
+		// while(pipe01[0] != 0) {
+		// 	read(pipe01[0], &y, sizeof(int));
+		// 	printf("p5 leu %d\n", y);
+		// }
 	}
 	else if ( id == 6 ){
+		// int y;
+		// while(pipe02[0] != 0) {
+		// 	read(pipe02[0], &y, sizeof(int));
+		// 	printf("p6 leu %d\n", y);
+		// }
+		
 	}
 	else if ( id == 7 ){
 	}
+
+	close(pipe01[0]);
+	close(pipe01[1]);
+	close(pipe02[0]);
+	close(pipe02[1]);
+
+	printf("Sai %d\n", getpid());
+
 	exit(0); 
 }
 
@@ -124,7 +143,7 @@ int criaFilhos() {
 			break;
 		}
 		shared_area_ptr->pids[id] = p; 
-		// printf("id: %d\tpid: %d\n", id, shared_area_ptr->pids[id]);
+		printf("id: %d\tpid: %d\n", id, shared_area_ptr->pids[id]);
 	}
 
 	if(p > 0) {
@@ -201,10 +220,3 @@ void* p4Consumidor(void * thread1IdPointer) {
 		}
 	}
 }
-
-// void teste() {
-// 	write(STDOUT_FILENO, "pode começar de novo\n", 22);
-// 	sem_post((sem_t*)&shared_area_ptr->mutex);
-// 	exit(0);
-// }
-
