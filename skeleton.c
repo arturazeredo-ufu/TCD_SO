@@ -38,7 +38,7 @@ int pipe02[2];
 int    criaFilhos();
 struct fila1 * criaFila1();
 struct fila2 * criaFila2();
-void   inicializarFila1();
+void   inicializaFilas();
 void   p1p2p3Produtor();
 void*  p4Consumidor(void * thread1Id);
 void   p4CriaThread();
@@ -58,6 +58,7 @@ int main(){
 	srand(time(NULL));
 	criaFila1(rand());
 	criaFila2(rand());
+	inicializaFilas();
 	
 	if ( sem_init((sem_t *)&fila1_ptr->mutex,1,1) != 0 ) {printf("mutex falhou\n");exit(-1);}
 	if ( sem_init((sem_t *)&fila1_ptr->sync,1,1) != 0 )  {printf("sync falhou\n" );exit(-1);}
@@ -133,11 +134,9 @@ struct fila1 * criaFila1(int keySM) {
   	}
 	
 	fila1_ptr = (struct fila1 *) shared_memory;
-
-	inicializarFila1();
 }
 
-void  inicializarFila1() {
+void  inicializaFilas() {
 	fila1_ptr->pids[0] = getpid();
 	int i;
 	for (i = 0; i < F1_SZ; i++)
@@ -165,9 +164,7 @@ struct fila2 * criaFila2(int keySM) {
 		exit(-1);
   	}
 	
-	fila1_ptr = (struct fila1 *) shared_memory;
-
-	inicializarFila1();
+	fila2_ptr = (struct fila2 *) shared_memory;
 }
 
 int criaFilhos() {
