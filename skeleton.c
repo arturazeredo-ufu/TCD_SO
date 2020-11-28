@@ -35,36 +35,25 @@ struct fila2 *fila2_ptr;
 int pipe01[2];
 int pipe02[2];
 
+void   controlaPipe(int pipe);
+void   criaFila(int fila, int keySM);
 int    criaFilhos();
-struct fila1 * criaFila1();
-struct fila2 * criaFila2();
+void   criaPipes();
+void   criaSemaforos();
 void   inicializaFilas();
 void   p1p2p3Produtor();
 void*  p4Consumidor(void * thread1Id);
 void   p4CriaThread();
+void printaFila(void);
 
-void printaFila(void) {
-	int i;
-	printf("\nF1:\n[");
-	for (i=0;i<QUEUE_SZ;++i) {
-		printf("%d", fila1_ptr->queue[i]);
-		if(i != QUEUE_SZ-1)
-			printf(", ");	
-	}
-	printf("]\n\n");
-}
 
 int main(){
 	srand(time(NULL));
-	criaFila1(rand());
-	criaFila2(rand());
+	criaFila(1, rand());
+	criaFila(2, rand());
 	inicializaFilas();
-	
-	if ( sem_init((sem_t *)&fila1_ptr->mutex,1,1) != 0 ) {printf("mutex falhou\n");exit(-1);}
-	if ( sem_init((sem_t *)&fila1_ptr->sync,1,1) != 0 )  {printf("sync falhou\n" );exit(-1);}
-
-	if ( pipe(pipe01) == -1 ){ printf("Erro pipe()"); return -1; }
-	if ( pipe(pipe02) == -1 ){ printf("Erro pipe()"); return -1; }
+	criaSemaforos();
+	criaPipes();
 
 	int id = criaFilhos();	
 
@@ -82,27 +71,10 @@ int main(){
 		pause();
 	}
 	else if ( id == 5 ){
-		int valor, resp;
-		while(1) {
-			resp = read(pipe01[0], &valor, sizeof(int));
-			if(resp == -1) {
-				printf("Erro na leitura do pipe01\n");
-			} else if (resp > 0) {
-				printf("Pipe1 Insere %d na Fila2\n", valor);
-			}
-		}
-		
+		controlaPipe(1);
 	}
 	else if ( id == 6 ){
-		int valor, resp;
-		while(1) {
-			resp = read(pipe02[0], &valor, sizeof(int));
-			if(resp == -1) {
-				printf("Erro na leitura do pipe01\n");
-			} else if (resp > 0) {
-				printf("Pipe2 Insere %d na Fila2\n", valor);
-			}
-		}
+		controlaPipe(2);
 	}
 	else if ( id == 7 ){
 	}
@@ -115,7 +87,8 @@ int main(){
 	exit(0); 
 }
 
-struct fila1 * criaFila1(int keySM) {
+
+void criaFila(int fila, int keySM) {
 	key_t key=keySM;
 	void *shared_memory = (void *)0;
 	int shmid;
@@ -132,40 +105,39 @@ struct fila1 * criaFila1(int keySM) {
 		printf("shmat falhou\n");
 		exit(-1);
   	}
-	
-	fila1_ptr = (struct fila1 *) shared_memory;
+
+  	if (fila == 1) {
+  		fila1_ptr = (struct fila1 *) shared_memory;	
+  	} else if (fila == 2) {
+  		fila2_ptr = (struct fila2 *) shared_memory;
+  	}
 }
+
 
 void  inicializaFilas() {
 	fila1_ptr->pids[0] = getpid();
 	int i;
-	for (i = 0; i < F1_SZ; i++)
+	for (i = 0; i < QUEUE_SZ; i++)
 		fila1_ptr->queue[i] = 0;
+	for (i = 0; i < QUEUE_SZ; i++)
+		fila2_ptr->queue[i] = 0;
 	for (i = 0; i < 8; i++)
 		fila1_ptr->pids[i] = 0; 
 	fila1_ptr->num=0;
 }
 
-struct fila2 * criaFila2(int keySM) {
-	key_t key=keySM;
-	void *shared_memory = (void *)0;
-	int shmid;
 
-	shmid = shmget(key,F2_SZ,0666|IPC_CREAT);
-	if ( shmid == -1 ) {
-		printf("shmget falhou\n");
-		exit(-1);
-	}
-
-	shared_memory = shmat(shmid,(void*)0,0);
-  
-	if (shared_memory == (void *) -1 ) {
-		printf("shmat falhou\n");
-		exit(-1);
-  	}
-	
-	fila2_ptr = (struct fila2 *) shared_memory;
+void criaSemaforos() {
+	if ( sem_init((sem_t *)&fila1_ptr->mutex,1,1) != 0 ) {printf("mutex falhou\n");exit(-1);}
+	if ( sem_init((sem_t *)&fila1_ptr->sync,1,1) != 0 )  {printf("sync falhou\n" );exit(-1);}
 }
+
+
+void criaPipes() {
+	if ( pipe(pipe01) == -1 ){ printf("Erro pipe()"); exit(-1); }
+	if ( pipe(pipe02) == -1 ){ printf("Erro pipe()"); exit(-1); }
+}
+
 
 int criaFilhos() {
 	printf("Criacao dos processos filhos:\n");
@@ -197,6 +169,7 @@ int criaFilhos() {
 	return id;
 }
 
+
 void p1p2p3Produtor() {
 	srand(getpid() + fila1_ptr->num);
 	sem_wait((sem_t*)&fila1_ptr->mutex);
@@ -224,6 +197,7 @@ void p1p2p3Produtor() {
 	}
 }
 
+
 void p4CriaThread() {
 	printaFila();
 	fila1_ptr->num = 0;
@@ -236,6 +210,7 @@ void p4CriaThread() {
 	pthread_join(thread2, NULL);
 	fila1_ptr->num = 0;
 }
+
 
 void* p4Consumidor(void * thread1IdPointer) {
 	int *thread1Id = (int *)thread1IdPointer;
@@ -266,4 +241,34 @@ void* p4Consumidor(void * thread1IdPointer) {
 			break; 
 		}
 	}
+}
+
+void controlaPipe(int pipe) {
+	int valor, resp;
+	while(1) {
+		
+		if (pipe == 1) {
+			resp = read(pipe01[0], &valor, sizeof(int));
+		} else if (pipe == 2) {
+			resp = read(pipe02[0], &valor, sizeof(int));
+		}
+
+		if(resp == -1) {
+			printf("Erro na leitura do pipe0%d\n", pipe);
+		} else if (resp > 0) {
+			printf("Pipe%d insere %d na Fila2\n", pipe, valor);
+		}
+	}
+}
+
+
+void printaFila(void) {
+	int i;
+	printf("\nF1:\n[");
+	for (i=0;i<QUEUE_SZ;++i) {
+		printf("%d", fila1_ptr->queue[i]);
+		if(i != QUEUE_SZ-1)
+			printf(", ");	
+	}
+	printf("]\n\n");
 }
