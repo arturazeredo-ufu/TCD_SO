@@ -13,7 +13,7 @@
 
 #define gettid() syscall(SYS_gettid)
 #define F1_SZ    140
-#define F2_SZ    44
+#define F2_SZ    48
 #define QUEUE_SZ 10
 
 struct fila1{ 
@@ -25,6 +25,7 @@ struct fila1{
 };
 
 struct fila2{ 
+	int contador;
 	int num;
 	int queue[QUEUE_SZ];
 };
@@ -41,7 +42,6 @@ void   inicializarFila1();
 void   p1p2p3Produtor();
 void*  p4Consumidor(void * thread1Id);
 void   p4CriaThread();
-void   teste();
 
 void printaFila(void) {
 	int i;
@@ -51,12 +51,13 @@ void printaFila(void) {
 		if(i != QUEUE_SZ-1)
 			printf(", ");	
 	}
-	printf("]\n");
+	printf("]\n\n");
 }
 
 int main(){
-	criaFila1(9827);
-	criaFila2(1345);
+	srand(time(NULL));
+	criaFila1(rand());
+	criaFila2(rand());
 	
 	if ( sem_init((sem_t *)&fila1_ptr->mutex,1,1) != 0 ) {printf("mutex falhou\n");exit(-1);}
 	if ( sem_init((sem_t *)&fila1_ptr->sync,1,1) != 0 )  {printf("sync falhou\n" );exit(-1);}
@@ -80,10 +81,27 @@ int main(){
 		pause();
 	}
 	else if ( id == 5 ){
-		// read_pipe(id);
+		int valor, resp;
+		while(1) {
+			resp = read(pipe01[0], &valor, sizeof(int));
+			if(resp == -1) {
+				printf("Erro na leitura do pipe01\n");
+			} else if (resp > 0) {
+				printf("Pipe1 Insere %d na Fila2\n", valor);
+			}
+		}
+		
 	}
 	else if ( id == 6 ){
-		// read_pipe(id);
+		int valor, resp;
+		while(1) {
+			resp = read(pipe02[0], &valor, sizeof(int));
+			if(resp == -1) {
+				printf("Erro na leitura do pipe01\n");
+			} else if (resp > 0) {
+				printf("Pipe2 Insere %d na Fila2\n", valor);
+			}
+		}
 	}
 	else if ( id == 7 ){
 	}
@@ -252,4 +270,3 @@ void* p4Consumidor(void * thread1IdPointer) {
 		}
 	}
 }
-
