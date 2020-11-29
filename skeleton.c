@@ -17,7 +17,7 @@
 #define QUEUE_SZ 10
 
 struct fila1{ 
-	int num;
+	int pos; // pos == 40: fila vazia | pos == 20: fila cheia
 	sem_t mutex;
 	sem_t sync;
 	int pids[8];
@@ -26,7 +26,7 @@ struct fila1{
 
 struct fila2{ 
 	int contador;
-	int num;
+	int pos;
 	int queue[QUEUE_SZ];
 };
 
@@ -34,17 +34,18 @@ struct fila1 *fila1_ptr;
 struct fila2 *fila2_ptr;
 int pipe01[2];
 int pipe02[2];
+long int thread1p4Id;
 
-void   controlaPipe(int pipe);
-void   criaFila(int fila, int keySM);
-int    criaFilhos();
-void   criaPipes();
-void   criaSemaforos();
-void   inicializaFilas();
-void   p1p2p3Produtor();
-void*  p4Consumidor(void * thread1Id);
-void   p4CriaThread();
-void printaFila(void);
+void  controlaPipe(int pipe);
+void  criaFila(int fila, int keySM);
+int   criaFilhos();
+void  criaPipes();
+void  criaSemaforos();
+void  inicializaFilas();
+void  p1p2p3Produtor();
+void  p4Consumidor();
+void* p4ControlaSignal();
+// void printaFila(void);
 
 
 int main(){
@@ -57,26 +58,20 @@ int main(){
 
 	int id = criaFilhos();	
 
-	if ( id <= 3 ){
+	if ( id > 0 && id <= 3 ){
 		signal(SIGUSR2, p1p2p3Produtor);
 		pause();
-	}
-	else if ( id == 4 ){
-		if (fila1_ptr->num == 0) 
-			for (int i=1; i<4; i++){
-				sleep(0.5);
-				while(kill(fila1_ptr->pids[i], SIGUSR2) == -1);
-			}
-		signal(SIGUSR1, p4CriaThread);
-		pause();
-	}
-	else if ( id == 5 ){
+	} else if ( id == 4 ){
+		thread1p4Id = gettid();
+		pthread_t thread2;
+		pthread_create(&thread2, NULL, p4ControlaSignal, NULL);
+		p4ControlaSignal();
+		pthread_join(thread2, NULL);
+	} else if ( id == 5 ){
 		controlaPipe(1);
-	}
-	else if ( id == 6 ){
+	} else if ( id == 6 ){
 		controlaPipe(2);
-	}
-	else if ( id == 7 ){
+	} else if ( id == 7 ){
 	}
 
 	close(pipe01[0]);
@@ -115,15 +110,12 @@ void criaFila(int fila, int keySM) {
 
 
 void  inicializaFilas() {
-	fila1_ptr->pids[0] = getpid();
 	int i;
 	for (i = 0; i < QUEUE_SZ; i++)
 		fila1_ptr->queue[i] = 0;
 	for (i = 0; i < QUEUE_SZ; i++)
 		fila2_ptr->queue[i] = 0;
-	for (i = 0; i < 8; i++)
-		fila1_ptr->pids[i] = 0; 
-	fila1_ptr->num=0;
+	fila1_ptr->pos=40;
 }
 
 
@@ -140,9 +132,9 @@ void criaPipes() {
 
 
 int criaFilhos() {
-	printf("Criacao dos processos filhos:\n");
+	// printf("Criacao dos processos filhos:\n");
 	pid_t p;
-	int id=0;
+	int id;
 	sem_wait((sem_t*)&fila1_ptr->sync);
 	for(id=1; id<=7; id++){
 		p = fork();
@@ -171,22 +163,27 @@ int criaFilhos() {
 
 
 void p1p2p3Produtor() {
-	srand(getpid() + fila1_ptr->num);
+	srand(getpid() + fila1_ptr->pos);
 	sem_wait((sem_t*)&fila1_ptr->mutex);
-	if (fila1_ptr->num < 9) {
+	
+	if (fila1_ptr->pos == 40) {
+		fila1_ptr->pos = 0;
+		sem_post((sem_t*)&fila1_ptr->mutex);
+		p1p2p3Produtor();
+	} else if (fila1_ptr->pos < 9) {
 
-		fila1_ptr->queue[fila1_ptr->num] = rand()%1000;
-		printf("%d insere %d na posicao %d\n", getpid(), fila1_ptr->queue[fila1_ptr->num], fila1_ptr->num);
-		fila1_ptr->num++;
+		fila1_ptr->queue[fila1_ptr->pos] = rand()%1000;
+		printf("%d insere %d na posicao %d\n", getpid(), fila1_ptr->queue[fila1_ptr->pos], fila1_ptr->pos);
+		fila1_ptr->pos++;
 		
 		sem_post((sem_t*)&fila1_ptr->mutex);
 		p1p2p3Produtor();
 	
-	} else if (fila1_ptr->num == 9) {
+	} else if (fila1_ptr->pos == 9) {
 	
-		fila1_ptr->queue[fila1_ptr->num] = rand()%1000;
-		printf("%d insere %d na posicao %d\n", getpid(), fila1_ptr->queue[fila1_ptr->num], fila1_ptr->num);
-		fila1_ptr->num++;
+		fila1_ptr->queue[fila1_ptr->pos] = rand()%1000;
+		printf("%d insere %d na posicao %d\n", getpid(), fila1_ptr->queue[fila1_ptr->pos], fila1_ptr->pos);
+		fila1_ptr->pos = 20;
 	
 		sleep(0.5);
 		while(kill(fila1_ptr->pids[4], SIGUSR1) == -1);
@@ -198,48 +195,58 @@ void p1p2p3Produtor() {
 }
 
 
-void p4CriaThread() {
-	printaFila();
-	fila1_ptr->num = 0;
-
-	int thread1id = gettid();
-
-	pthread_t thread2;
-	pthread_create(&thread2, NULL, p4Consumidor, &thread1id);
-	p4Consumidor(&thread1id);
-	pthread_join(thread2, NULL);
-	fila1_ptr->num = 0;
+void* p4ControlaSignal(void) {
+	if (thread1p4Id == gettid()) {
+		if (fila1_ptr->pos == 40) {
+			for (int i=1; i<4; i++){
+				sleep(0.5);
+				while(kill(fila1_ptr->pids[i], SIGUSR2) == -1);
+			}
+		}
+	}
+		
+	signal(SIGUSR1, p4Consumidor);
+	pause();
 }
 
 
-void* p4Consumidor(void * thread1IdPointer) {
-	int *thread1Id = (int *)thread1IdPointer;
+void p4Consumidor() {
 	int pipeId;
-	while (fila1_ptr->num <= 9) {
-	
-		sem_wait((sem_t*)&fila1_ptr->mutex);
-	
-		if (fila1_ptr->num <= 9) {
-			if (gettid() == *thread1Id){
-				pipeId = 1;
-				write(pipe01[1], &fila1_ptr->queue[fila1_ptr->num], sizeof(int));
-			}
-			else {
-				pipeId = 2;
-				write(pipe02[1], &fila1_ptr->queue[fila1_ptr->num], sizeof(int));
-			}
-			printf("thread %ld escreve %d na pipe0%d\n", gettid(), fila1_ptr->queue[fila1_ptr->num], pipeId);
-			
-			fila1_ptr->queue[fila1_ptr->num] = 0;
-			fila1_ptr->num++;
-			
-			sem_post((sem_t*)&fila1_ptr->mutex);
-			if (fila1_ptr->num == 9)
-				break;	
+	sem_wait((sem_t*)&fila1_ptr->mutex);
+	if (fila1_ptr->pos == 20) {
+		fila1_ptr->pos = 0;
+		sem_post((sem_t*)&fila1_ptr->mutex);
+		p4Consumidor();
+	} else if (fila1_ptr->pos < 9) {
+		if (thread1p4Id == gettid()){
+			write(pipe01[1], &fila1_ptr->queue[fila1_ptr->pos], sizeof(int));	
+			pipeId = 1;
 		} else {
-			sem_post((sem_t*)&fila1_ptr->mutex);
-			break; 
+			write(pipe02[1], &fila1_ptr->queue[fila1_ptr->pos], sizeof(int));
+			pipeId = 2;
 		}
+		// printf("thread %ld escreve %d na pipe0%d\n", gettid(), fila1_ptr->queue[fila1_ptr->pos], pipeId);
+		fila1_ptr->pos++;
+		
+		sem_post((sem_t*)&fila1_ptr->mutex);
+		p4Consumidor();
+	
+	} else if (fila1_ptr->pos == 9) {
+	
+		if (thread1p4Id == gettid()){
+			write(pipe01[1], &fila1_ptr->queue[fila1_ptr->pos], sizeof(int));	
+			pipeId = 1;
+		} else {
+			write(pipe02[1], &fila1_ptr->queue[fila1_ptr->pos], sizeof(int));
+			pipeId = 2;
+		}
+		// printf("thread %ld escreve %d na pipe0%d\n", gettid(), fila1_ptr->queue[fila1_ptr->pos], pipeId);
+		fila1_ptr->pos = 40;
+	
+		sem_post((sem_t*)&fila1_ptr->mutex);
+	
+	} else {
+		sem_post((sem_t*)&fila1_ptr->mutex);
 	}
 }
 
@@ -256,19 +263,18 @@ void controlaPipe(int pipe) {
 		if(resp == -1) {
 			printf("Erro na leitura do pipe0%d\n", pipe);
 		} else if (resp > 0) {
-			printf("Pipe%d insere %d na Fila2\n", pipe, valor);
+			// printf("Pipe%d insere %d na Fila2\n", pipe, valor);
 		}
 	}
 }
 
-
-void printaFila(void) {
-	int i;
-	printf("\nF1:\n[");
-	for (i=0;i<QUEUE_SZ;++i) {
-		printf("%d", fila1_ptr->queue[i]);
-		if(i != QUEUE_SZ-1)
-			printf(", ");	
-	}
-	printf("]\n\n");
-}
+// void printaFila(void) {
+// 	int i;
+// 	printf("\nF1:\n[");
+// 	for (i=0;i<QUEUE_SZ;++i) {
+// 		printf("%d", fila1_ptr->queue[i]);
+// 		if(i != QUEUE_SZ-1)
+// 			printf(", ");	
+// 	}
+// 	printf("]\n\n");
+// }
