@@ -28,11 +28,15 @@ typedef struct queue_t * Queue;
 Queue F1;
 int* pids;
 long int thread1p4Id;
+int pipe01[2];
+int pipe02[2];
 
 void* consumerF1(); 
+void  controlPipe(int pipe);
 int   createChildren();
 void  createF1 (int keySM);
 void  createPids (int keySM);
+void  createPipes();
 void  createSemaphore (sem_t * semaphore);
 void  initQueue (Queue queue);
 int   isEmpty (Queue queue);
@@ -42,19 +46,20 @@ int   pop (Queue queue, int * value);
 void  producerF1();
 int   push (Queue queue, int value);
 void* sigHandlerConsumerF1();
+void* sigHandlerProducerF1();
 
 int main () {
 	srand(time(NULL));
 	createF1(rand());
 	initQueue(F1);
 	createPids(rand());
+	createPipes();
 	*pids = getpid();
 
 	int id = createChildren();
 
 	if ( id <= 3 ){
-		signal(SIGUSR2, producerF1);
-		pause();
+		sigHandlerProducerF1();
 	} else if ( id == 4 ){
 		thread1p4Id = gettid();
 		pthread_t thread2;
@@ -62,9 +67,9 @@ int main () {
 		sigHandlerConsumerF1();
 		pthread_join(thread2, NULL);
 	} else if ( id == 5 ){
-
+		controlPipe(1);
 	} else if ( id == 6 ){
-
+		controlPipe(2);
 	} else if ( id == 7 ){
 
 	}
@@ -97,7 +102,7 @@ int push (Queue queue, int value) {
 		sem_post((sem_t*)&queue->mutex);	
 		return -1;
 	}
-	printf("%d insere %d\n", getpid(), value);
+	// printf("%d insere %d\n", getpid(), value);
 
 	queue->array[queue->lst] = value;
 	queue->lst = next(queue->lst);
@@ -118,7 +123,7 @@ int pop (Queue queue, int * value) {
 	queue->fst = next(queue->fst);
 	queue->count--;
 	
-	printf("%d remove %d\n", getpid(), *value);
+	// printf("%d remove %d\n", getpid(), *value);
 	
 	sem_post((sem_t*)&queue->mutex);
 	return 0;	
@@ -173,6 +178,10 @@ void createSemaphore (sem_t * semaphore) {
 	}
 }
 
+void createPipes() {
+	if ( pipe(pipe01) == -1 ){ printf("Erro pipe()"); exit(-1); }
+	if ( pipe(pipe02) == -1 ){ printf("Erro pipe()"); exit(-1); }
+}
 
 int createChildren() {
 	pid_t p;
@@ -184,7 +193,7 @@ int createChildren() {
 			exit(-1);
 		}
 		if ( p == 0 ) {
-			printf("%d\t%d\n", getpid(), id);
+			// printf("%d\t%d\n", getpid(), id);
 			break;
 		}
 		*(pids+id) = p;
@@ -195,6 +204,11 @@ int createChildren() {
 			wait(NULL);
 		
 	return id;
+}
+
+void* sigHandlerProducerF1() {
+	signal(SIGUSR2, producerF1);
+	pause();
 }
 
 void producerF1() {
@@ -230,9 +244,33 @@ void* consumerF1() {
 	while(1) {
 		response = pop(F1, &value);
 		if (response == 0) {
-			printf("insere na pipe %d\n", value);
+			
+			if (thread1p4Id == gettid())
+				write(pipe01[1], &value, sizeof(int));	
+			else 
+				write(pipe02[1], &value, sizeof(int));
+
+			// printf("%ld insere na pipe %d\n", gettid(), value);
 		} else if (response == -1) 
 			break;
 	}
 }
 
+void controlPipe(int pipe) {
+	int valor, resp;
+	while(1) {
+		
+		if (pipe == 1) {
+			resp = read(pipe01[0], &valor, sizeof(int));
+		} else if (pipe == 2) {
+			resp = read(pipe02[0], &valor, sizeof(int));
+		}
+
+		if(resp == -1) {
+			printf("Erro na leitura do pipe0%d\n", pipe);
+		} else if (resp > 0) {
+			
+			printf("pipe0%d insere %d na Fila2\n", pipe, valor);
+		}
+	}
+}
