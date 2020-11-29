@@ -29,7 +29,7 @@ Queue F1;
 int* pids;
 long int thread1p4Id;
 
-void  consumerF1();
+void* consumerF1(); 
 int   createChildren();
 void  createF1 (int keySM);
 void  createPids (int keySM);
@@ -41,7 +41,6 @@ int   next (int position);
 int   pop (Queue queue, int * value);
 void  producerF1();
 int   push (Queue queue, int value);
-void* signalControl(); 
 
 int main () {
 	srand(time(NULL));
@@ -58,8 +57,8 @@ int main () {
 	} else if ( id == 4 ){
 		thread1p4Id = gettid();
 		pthread_t thread2;
-		pthread_create(&thread2, NULL, signalControl, NULL);
-		signalControl();
+		pthread_create(&thread2, NULL, consumerF1, NULL);
+		consumerF1();
 		pthread_join(thread2, NULL);
 	} else if ( id == 5 ){
 
@@ -77,6 +76,7 @@ void initQueue (Queue queue) {
 	queue->lst   = 0;
 	queue->count = 0;
 	createSemaphore(&queue->mutex);
+	push(F1, 1);
 }
 
 int isFull (Queue queue) {
@@ -97,6 +97,8 @@ int push (Queue queue, int value) {
 		sem_post((sem_t*)&queue->mutex);	
 		return -1;
 	}
+	printf("%d insere %d\n", getpid(), value);
+
 	queue->array[queue->lst] = value;
 	queue->lst = next(queue->lst);
 	queue->count++;
@@ -116,6 +118,7 @@ int pop (Queue queue, int * value) {
 	queue->fst = next(queue->fst);
 	queue->count--;
 	
+	printf("%d remove %d\n", getpid(), *value);
 	int flagSendSignal = isEmpty(queue);
 	sem_post((sem_t*)&queue->mutex);
 
@@ -181,8 +184,10 @@ int createChildren() {
 			printf("fork failed\n");
 			exit(-1);
 		}
-		if ( p == 0 )
+		if ( p == 0 ) {
+			printf("%d\t%d\n", getpid(), id);
 			break;
+		}
 		*(pids+id) = p;
 	}
 	
@@ -200,29 +205,33 @@ void producerF1() {
 		random = rand()%1000;
 		response = push(F1, random);
 		if(response == 1) {
-			sleep(0.5);
-			while(kill(*(pids+4), SIGUSR1) == -1);
-		} else if (response == -1) {
-			printf("Fila Cheia\n");
-			break;
-		}
-	}
-}
-
-void* signalControl() {
-	if (thread1p4Id == gettid()) 
-		if (isEmpty(F1)) 
-			for (int i=1; i<4; i++){
+			for (int i = 0; i < 2; ++i) {
 				sleep(0.5);
-				while(kill(*(pids+i), SIGUSR2) == -1);
+				while(kill(*(pids+4), SIGUSR1) == -1);
 			}
-
-	for(int i = 0; i<2; i++) {
-		signal(SIGUSR1, consumerF1);
-		pause();	
+			break;
+		} else if (response == -1) 
+			break;
 	}
 }
 
-void consumerF1() {
-	printf("%ld consumino\n", gettid());
+void* consumerF1() {
+	int response, value;
+	while(1) {
+		response = pop(F1, &value);
+		if(response == 1) {
+			if (gettid() == thread1p4Id){
+				for (int i = 1; i < 4; ++i) {
+					sleep(0.5);
+					while(kill(*(pids+i), SIGUSR2) == -1);
+				}
+			}
+			signal(SIGUSR1, (__sighandler_t) consumerF1);
+			pause();
+			break;
+		} else if (response == 0) {
+			printf("insere na pipe\n");
+		} else if (response == -1) 
+			break;
+	}
 }
