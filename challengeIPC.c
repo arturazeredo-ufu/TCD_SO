@@ -41,6 +41,7 @@ int   next (int position);
 int   pop (Queue queue, int * value);
 void  producerF1();
 int   push (Queue queue, int value);
+void* sigHandlerConsumerF1();
 
 int main () {
 	srand(time(NULL));
@@ -57,8 +58,8 @@ int main () {
 	} else if ( id == 4 ){
 		thread1p4Id = gettid();
 		pthread_t thread2;
-		pthread_create(&thread2, NULL, consumerF1, NULL);
-		consumerF1();
+		pthread_create(&thread2, NULL, sigHandlerConsumerF1, NULL);
+		sigHandlerConsumerF1();
 		pthread_join(thread2, NULL);
 	} else if ( id == 5 ){
 
@@ -76,7 +77,6 @@ void initQueue (Queue queue) {
 	queue->lst   = 0;
 	queue->count = 0;
 	createSemaphore(&queue->mutex);
-	push(F1, 1);
 }
 
 int isFull (Queue queue) {
@@ -119,10 +119,9 @@ int pop (Queue queue, int * value) {
 	queue->count--;
 	
 	printf("%d remove %d\n", getpid(), *value);
-	int flagSendSignal = isEmpty(queue);
+	
 	sem_post((sem_t*)&queue->mutex);
-
-	return flagSendSignal;	
+	return 0;	
 }
 
 void createF1 (int keySM) {
@@ -215,23 +214,25 @@ void producerF1() {
 	}
 }
 
+void* sigHandlerConsumerF1() {
+	if (gettid() == thread1p4Id) {
+		for (int i = 1; i < 4; ++i) {
+			sleep(0.5);
+			while(kill(*(pids+i), SIGUSR2) == -1);
+		}
+	}
+	signal(SIGUSR1, (__sighandler_t) consumerF1);
+	pause();
+}
+
 void* consumerF1() {
 	int response, value;
 	while(1) {
 		response = pop(F1, &value);
-		if(response == 1) {
-			if (gettid() == thread1p4Id){
-				for (int i = 1; i < 4; ++i) {
-					sleep(0.5);
-					while(kill(*(pids+i), SIGUSR2) == -1);
-				}
-			}
-			signal(SIGUSR1, (__sighandler_t) consumerF1);
-			pause();
-			break;
-		} else if (response == 0) {
-			printf("insere na pipe\n");
+		if (response == 0) {
+			printf("insere na pipe %d\n", value);
 		} else if (response == -1) 
 			break;
 	}
 }
+
