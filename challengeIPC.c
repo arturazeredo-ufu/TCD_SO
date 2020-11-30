@@ -22,19 +22,21 @@ struct queue_t {
 };
 typedef struct queue_t * Queue;
 
-#define F1_SM_SZ   sizeof(struct queue_t)
+#define SM_QUEUE_SZ   sizeof(struct queue_t)
 #define PIDS_SM_SZ PIDS_SZ*sizeof(int)
 
 Queue F1;
+Queue F2;
 int* pids;
 long int thread1p4Id;
 int pipe01[2];
 int pipe02[2];
 
 void* consumerF1(); 
-void  controlPipe(int pipe);
+void* consumerF2();
+void  producerF2(int pipe);
 int   createChildren();
-void  createF1 (int keySM);
+void  createQueue (int queue, int keySM);
 void  createPids (int keySM);
 void  createPipes();
 void  createSemaphore (sem_t * semaphore);
@@ -50,8 +52,10 @@ void* sigHandlerProducerF1();
 
 int main () {
 	srand(time(NULL));
-	createF1(rand());
+	createQueue(1, rand());
+	createQueue(2, rand());
 	initQueue(F1);
+	initQueue(F2);
 	createPids(rand());
 	createPipes();
 	*pids = getpid();
@@ -67,12 +71,18 @@ int main () {
 		sigHandlerConsumerF1();
 		pthread_join(thread2, NULL);
 	} else if ( id == 5 ){
-		controlPipe(1);
+		producerF2(1);
 	} else if ( id == 6 ){
-		controlPipe(2);
+		producerF2(2);
 	} else if ( id == 7 ){
-
-	}
+		pthread_t tids[2];
+		for (int i = 0; i < 2; i++) 
+	        pthread_create(&tids[i], NULL, consumerF2, NULL);
+	    consumerF2();
+	    for (int i = 0; i < 2; ++i) {
+			pthread_join(tids[i], NULL);
+	    }
+	}	
 
 	return 0;
 }
@@ -129,12 +139,12 @@ int pop (Queue queue, int * value) {
 	return 0;	
 }
 
-void createF1 (int keySM) {
+void createQueue (int queue, int keySM) {
 	key_t key=keySM;
 	void *shared_memory = (void *)0;
 	int shmid;
 
-	shmid = shmget(key, F1_SM_SZ, 0666|IPC_CREAT);
+	shmid = shmget(key, SM_QUEUE_SZ, 0666|IPC_CREAT);
 	if ( shmid == -1 ) {
 		printf("shmget failed\n");
 		exit(-1);
@@ -146,8 +156,13 @@ void createF1 (int keySM) {
 		printf("shmat failed\n");
 		exit(-1);
   	}
+  	if (queue == 1) {
+  		F1 = (Queue) shared_memory;		
+  	} else if (queue == 2) {
+  		F2 = (Queue) shared_memory;		
+  	}
 
-	F1 = (Queue) shared_memory;	
+	
 }
 
 void createPids (int keySM) {
@@ -256,21 +271,33 @@ void* consumerF1() {
 	}
 }
 
-void controlPipe(int pipe) {
-	int valor, resp;
+void producerF2(int pipe) {
+	int value, resp, response;
 	while(1) {
 		
 		if (pipe == 1) {
-			resp = read(pipe01[0], &valor, sizeof(int));
+			resp = read(pipe01[0], &value, sizeof(int));
 		} else if (pipe == 2) {
-			resp = read(pipe02[0], &valor, sizeof(int));
+			resp = read(pipe02[0], &value, sizeof(int));
 		}
 
 		if(resp == -1) {
 			printf("Erro na leitura do pipe0%d\n", pipe);
 		} else if (resp > 0) {
-			
-			printf("pipe0%d insere %d na Fila2\n", pipe, valor);
+			response = push(F2, value); // Mudar para busy wait;
+			if (response == -1) 
+				break; 
 		}
+	}
+}
+
+void* consumerF2() {
+	int value, response;
+	while(1) {
+		response = pop(F2, &value);
+		if (response == 0) {
+			printf("%d retirado da F2\n", value);
+		} else if (response == -1) 
+			break;
 	}
 }
