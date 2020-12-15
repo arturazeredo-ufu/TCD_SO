@@ -5,7 +5,6 @@
 #include <stdlib.h>
 #include <sys/shm.h>
 #include <sys/syscall.h>
-#include <sys/types.h>
 #include <sys/wait.h>
 #include <threads.h>
 #include <time.h>
@@ -29,6 +28,7 @@ Queue F1;
 Queue F2;
 int* pids;
 long int thread1p4Id;
+int flagp4;
 int pipe01[2];
 int pipe02[2];
 
@@ -112,7 +112,13 @@ int push (Queue queue, int value) {
 		sem_post((sem_t*)&queue->mutex);	
 		return -1;
 	}
-	// printf("%d insere %d\n", getpid(), value);
+
+	if (getpid() <= *(pids+3)) {
+		printf("%d insere %d na F1\n", getpid(), value);
+	} else {
+		printf("%d insere %d na F2\n", getpid(), value);
+	}
+	
 
 	queue->array[queue->lst] = value;
 	queue->lst = next(queue->lst);
@@ -133,8 +139,11 @@ int pop (Queue queue, int * value) {
 	queue->fst = next(queue->fst);
 	queue->count--;
 	
-	// printf("%d remove %d\n", getpid(), *value);
-	
+	if (getpid() == *(pids+7)) {
+		printf("%d remove %d da F2\n", getpid(), *value);
+	} else {
+		printf("%d remove %d da F1\n", getpid(), *value);
+	}
 	sem_post((sem_t*)&queue->mutex);
 	return 0;	
 }
@@ -208,7 +217,7 @@ int createChildren() {
 			exit(-1);
 		}
 		if ( p == 0 ) {
-			// printf("%d\t%d\n", getpid(), id);
+			printf("%d\t%d\n", getpid(), id);
 			break;
 		}
 		*(pids+id) = p;
@@ -233,10 +242,7 @@ void producerF1() {
 		random = rand()%1000;
 		response = push(F1, random);
 		if(response == 1) {
-			for (int i = 0; i < 2; ++i) {
-				sleep(0.5);
-				while(kill(*(pids+4), SIGUSR1) == -1);
-			}
+			while(kill(*(pids+4), SIGUSR1) == -1);
 			break;
 		} else if (response == -1) 
 			break;
@@ -245,13 +251,18 @@ void producerF1() {
 
 void* sigHandlerConsumerF1() {
 	if (gettid() == thread1p4Id) {
-		for (int i = 1; i < 4; ++i) {
-			sleep(0.5);
+
+		for (int i = 1; i < 4; ++i)
 			while(kill(*(pids+i), SIGUSR2) == -1);
-		}
+
+		signal(SIGUSR1, (__sighandler_t) consumerF1);
+		pause();
+		flagp4 = 1;
 	}
-	signal(SIGUSR1, (__sighandler_t) consumerF1);
-	pause();
+
+	while(flagp4 == 0);
+	
+	consumerF1();
 }
 
 void* consumerF1() {
@@ -284,7 +295,7 @@ void producerF2(int pipe) {
 		if(resp == -1) {
 			printf("Erro na leitura do pipe0%d\n", pipe);
 		} else if (resp > 0) {
-			response = push(F2, value); // Mudar para busy wait;
+			response = push(F2, value);
 			if (response == -1) 
 				break; 
 		}
