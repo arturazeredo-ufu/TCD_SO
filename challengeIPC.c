@@ -11,9 +11,10 @@
 #include <unistd.h>
 
 #define gettid() syscall(SYS_gettid)
-#define QUEUE_SZ 10
-#define PIDS_SZ  8
+#define QUEUE_SZ 10 //Tamanho das filas (F1 e F2)
+#define PIDS_SZ  8  //Tamanho do vetor com PIDs de todos os processos
 
+//Estrutura das filas 1 e 2
 struct queue_t { 
 	sem_t mutex;
 	int fst, lst, count; 
@@ -21,77 +22,184 @@ struct queue_t {
 };
 typedef struct queue_t * Queue;
 
-#define SM_QUEUE_SZ   sizeof(struct queue_t)
-#define PIDS_SM_SZ PIDS_SZ*sizeof(int)
+//Estrutura das flags utilizadas para controle de produção e consumo das filas
+struct flag {
+	sem_t mutex;
+	int flag; // 0=Produzir || 1=Consumir 
+};
+typedef struct flag * Flag;
 
-Queue F1;
-Queue F2;
-int* pids;
-long int thread1p4Id;
-int flagp4;
+//Quantidade de bytes para definição das shared memories 
+#define SM_QUEUE_SZ sizeof(struct queue_t) 
+#define SM_PIDS_SZ  PIDS_SZ*sizeof(int)
+
+Queue F1; //Ponteiro para F1 (shared memory)
+Queue F2; //Ponteiro para F2 (shared memory)
+int* pids; //Vetor com PIDs de todos os processos [pai,p1,p2,p3,p4,p5,p6,p7] (shared memory)
+long int thread1p4Id; //TID da thread original do P4
+
 int pipe01[2];
 int pipe02[2];
 
+// int flagp4;
+
+//Protótipos das funções
 void* consumerF1(); 
 void* consumerF2();
-void  producerF2(int pipe);
 int   createChildren();
-void  createQueue (int queue, int keySM);
-void  createPids (int keySM);
 void  createPipes();
 void  createSemaphore (sem_t * semaphore);
+void  createSharedMemory (int type, int sharedMemorySize, int keySM);
 void  initQueue (Queue queue);
 int   isEmpty (Queue queue);
 int   isFull (Queue queue);
 int   next (int position);
 int   pop (Queue queue, int * value);
 void  producerF1();
+void  producerF2(int pipe);
 int   push (Queue queue, int value);
 void* sigHandlerConsumerF1();
-void* sigHandlerProducerF1();
 
 int main () {
-	srand(time(NULL));
-	createQueue(1, rand());
-	createQueue(2, rand());
-	initQueue(F1);
-	initQueue(F2);
-	createPids(rand());
-	createPipes();
-	*pids = getpid();
 
+	//Criação e inicialização das Shared Memories
+	srand(time(NULL));
+	createSharedMemory(1, SM_QUEUE_SZ, random()); //F1
+	createSharedMemory(2, SM_QUEUE_SZ, random()); //F2
+	createSharedMemory(3, SM_PIDS_SZ,  random()); //pids
+	createSharedMemory(4, sizeof(int), random()); //flagF1
+
+	//Inicialização das pipes
+	createPipes();
+
+	//Cria processos filhos
 	int id = createChildren();
 
+	//P3
 	if ( id <= 3 ){
-		sigHandlerProducerF1();
-	} else if ( id == 4 ){
-		thread1p4Id = gettid();
-		pthread_t thread2;
-		pthread_create(&thread2, NULL, sigHandlerConsumerF1, NULL);
-		sigHandlerConsumerF1();
-		pthread_join(thread2, NULL);
-	} else if ( id == 5 ){
-		producerF2(1);
-	} else if ( id == 6 ){
-		producerF2(2);
-	} else if ( id == 7 ){
-		pthread_t tids[2];
-		for (int i = 0; i < 2; i++) 
-	        pthread_create(&tids[i], NULL, consumerF2, NULL);
-	    consumerF2();
-	    for (int i = 0; i < 2; ++i) {
-			pthread_join(tids[i], NULL);
-	    }
-	}	
+		producerF1();
+	}
+	 // else if ( id == 4 ){
+	// 	thread1p4Id = gettid();
+	// 	pthread_t thread2;
+	// 	pthread_create(&thread2, NULL, sigHandlerConsumerF1, NULL);
+	// 	sigHandlerConsumerF1();
+	// 	pthread_join(thread2, NULL);
+	// } else if ( id == 5 ){
+	// 	producerF2(1);
+	// } else if ( id == 6 ){
+	// 	producerF2(2);
+	// } else if ( id == 7 ){
+	// 	pthread_t tids[2];
+	// 	for (int i = 0; i < 2; i++) 
+	//         pthread_create(&tids[i], NULL, consumerF2, NULL);
+	//     consumerF2();
+	//     for (int i = 0; i < 2; ++i) {
+	// 		pthread_join(tids[i], NULL);
+	//     }
+	// }	
 
 	return 0;
 }
 
+//Argumento type: 
+//	1 = Ponteiro para F1
+//  2 = Ponteiro para F2
+//  3 = Ponteiro para vetor de PIDs
+void createSharedMemory (int type, int sharedMemorySize, int keySM) {
+	key_t key = keySM;
+	void *sharedMemory = (void *)0;
+	int shmid;
+
+	shmid = shmget(key, sharedMemorySize, 0666|IPC_CREAT);
+	if ( shmid == -1 ) {
+		printf("shmget failed\n");
+		exit(-1);
+	}
+
+	sharedMemory = shmat(shmid,(void*)0,0);
+  
+	if (sharedMemory == (void *) -1 ) {
+		printf("shmat failed\n");
+		exit(-1);
+  	}
+
+  	if (type == 1) {
+  		F1 = (Queue) sharedMemory;
+  		initQueue(F1); 
+  	} else if (type == 2) {
+  		F2 = (Queue) sharedMemory;
+  		initQueue(F2);
+  	} else if (type == 3) {
+  		pids = (int *) sharedMemory;
+  		*(pids) = getpid(); // pids[0] = Pid do processo pai
+  	}	
+}
+
+//Inicializa todos os valores da struct queue_t
 void initQueue (Queue queue) {
 	queue->fst   = 0;
 	queue->lst   = 0;
 	queue->count = 0;
 	createSemaphore(&queue->mutex);
+}
+
+//Inicializa semáforo
+void createSemaphore (sem_t * semaphore) {
+	if ( sem_init(semaphore,1,1) != 0 ) {
+		printf("Semaphore creation failed\n");
+		exit(-1);
+	}
+}
+
+//Inicializa ambas pipes do projeto
+void createPipes() {
+	if ( pipe(pipe01) == -1 ){ printf("Erro pipe()"); exit(-1); }
+	if ( pipe(pipe02) == -1 ){ printf("Erro pipe()"); exit(-1); }
+}
+
+//Processo pai cria todos os 7 filhos
+int createChildren() {
+	pid_t p;
+	int id;
+
+	sem_wait((sem_t*)&F1->mutex); //Pai trava semáforo para criar todos os filhos
+	for(id=1; id<=7; id++){
+		p = fork();
+		if ( p < 0 ) {
+			printf("fork failed\n");
+			exit(-1);
+		}
+		if ( p == 0 ) {
+			printf("%d\t%d\n", getpid(), id);
+			sem_wait((sem_t*)&F1->mutex); //Filhos esperam liberação do semáforo
+			return id;
+		}
+		*(pids+id) = p; //Pai recebe PID do filho criado e insere valor no vetor pids
+	}
+
+	for (int i = 0; i < 8; ++i)
+		sem_post((sem_t*)&F1->mutex); //Pai libera semáforo para todos os filhos partirem sincronizados 
+	
+	for (int i = 0; i < 7; i++)
+		wait(NULL); //Pai espera o fim da execução de todos os filhos
+	
+	return 0;
+}
+
+void producerF1() {
+
+	int response, random;
+	srand(getpid() + F1->lst);
+	while(1) {
+		random = rand()%1000;
+		response = push(F1, random);
+		if(response == 1) {
+			while(kill(*(pids+4), SIGUSR1) == -1);
+			break;
+		} else if (response == -1) 
+			break;
+	}
 }
 
 int isFull (Queue queue) {
@@ -148,122 +256,21 @@ int pop (Queue queue, int * value) {
 	return 0;	
 }
 
-void createQueue (int queue, int keySM) {
-	key_t key=keySM;
-	void *shared_memory = (void *)0;
-	int shmid;
+// void* sigHandlerConsumerF1() {
+// 	if (gettid() == thread1p4Id) {
 
-	shmid = shmget(key, SM_QUEUE_SZ, 0666|IPC_CREAT);
-	if ( shmid == -1 ) {
-		printf("shmget failed\n");
-		exit(-1);
-	}
+// 		for (int i = 1; i < 4; ++i)
+// 			while(kill(*(pids+i), SIGUSR2) == -1);
 
-	shared_memory = shmat(shmid,(void*)0,0);
-  
-	if (shared_memory == (void *) -1 ) {
-		printf("shmat failed\n");
-		exit(-1);
-  	}
-  	if (queue == 1) {
-  		F1 = (Queue) shared_memory;		
-  	} else if (queue == 2) {
-  		F2 = (Queue) shared_memory;		
-  	}
+// 		signal(SIGUSR1, (__sighandler_t) consumerF1);
+// 		pause();
+// 		flagp4 = 1;
+// 	}
 
+// 	while(flagp4 == 0);
 	
-}
-
-void createPids (int keySM) {
-	key_t key=keySM;
-	void *shared_memory = (void *)0;
-	int shmid;
-
-	shmid = shmget(key, PIDS_SM_SZ, 0666|IPC_CREAT);
-	if ( shmid == -1 ) {
-		printf("shmget failed\n");
-		exit(-1);
-	}
-
-	shared_memory = shmat(shmid,(void*)0,0);
-  
-	if (shared_memory == (void *) -1 ) {
-		printf("shmat failed\n");
-		exit(-1);
-  	}
-
-	pids = (int *) shared_memory;	
-}
-
-void createSemaphore (sem_t * semaphore) {
-	if ( sem_init(semaphore,1,1) != 0 ) {
-		printf("Semaphore creation failed\n");
-		exit(-1);
-	}
-}
-
-void createPipes() {
-	if ( pipe(pipe01) == -1 ){ printf("Erro pipe()"); exit(-1); }
-	if ( pipe(pipe02) == -1 ){ printf("Erro pipe()"); exit(-1); }
-}
-
-int createChildren() {
-	pid_t p;
-	int id;
-	for(id=1; id<=7; id++){
-		p = fork();
-		if ( p < 0 ) {
-			printf("fork failed\n");
-			exit(-1);
-		}
-		if ( p == 0 ) {
-			printf("%d\t%d\n", getpid(), id);
-			break;
-		}
-		*(pids+id) = p;
-	}
-	
-	if(p > 0)
-		for (int i = 0; i < 8; i++) 
-			wait(NULL);
-		
-	return id;
-}
-
-void* sigHandlerProducerF1() {
-	signal(SIGUSR2, producerF1);
-	pause();
-}
-
-void producerF1() {
-	int response, random;
-	srand(getpid() + F1->lst);
-	while(1) {
-		random = rand()%1000;
-		response = push(F1, random);
-		if(response == 1) {
-			while(kill(*(pids+4), SIGUSR1) == -1);
-			break;
-		} else if (response == -1) 
-			break;
-	}
-}
-
-void* sigHandlerConsumerF1() {
-	if (gettid() == thread1p4Id) {
-
-		for (int i = 1; i < 4; ++i)
-			while(kill(*(pids+i), SIGUSR2) == -1);
-
-		signal(SIGUSR1, (__sighandler_t) consumerF1);
-		pause();
-		flagp4 = 1;
-	}
-
-	while(flagp4 == 0);
-	
-	consumerF1();
-}
+// 	consumerF1();
+// }
 
 void* consumerF1() {
 	int response, value;
