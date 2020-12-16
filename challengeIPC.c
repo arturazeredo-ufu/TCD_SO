@@ -44,8 +44,8 @@ int pipe02[2];
 
 
 //Protótipos das funções
-void* consumerF1(); 
-void* consumerF2();
+void  consumerF1(); 
+// void* consumerF2();
 int   createChildren();
 void  createPipes();
 void  createSemaphore (sem_t * semaphore);
@@ -54,13 +54,15 @@ void  initQueue (Queue queue);
 int   isEmpty (Queue queue);
 int   isFull (Queue queue);
 int   next (int position);
+void* p4SignalReceiver();
 int   pop (Queue queue, int * value);
 void  producerF1();
-void  producerF2(int pipe);
+// void  producerF2(int pipe);
 int   push (Queue queue, int value);
-void* sigHandlerConsumerF1();
+void* setFlagF1ToConsume();
 
 int main () {
+	printf("pai --> %d\n", getpid());
 
 	//Criação e inicialização das Shared Memories
 	srand(time(NULL));
@@ -75,17 +77,26 @@ int main () {
 	//Cria processos filhos
 	int id = createChildren();
 
-	//P3
+	//P1, P2, P3
 	if ( id <= 3 ){
+
+		//Garante que o p4 chegue em p4SignalReceiver, antes dos produtores enviarem o sinal para consumo
+		sleep(1); 
+		
 		producerF1();
 	}
-	 // else if ( id == 4 ){
-	// 	thread1p4Id = gettid();
-	// 	pthread_t thread2;
-	// 	pthread_create(&thread2, NULL, sigHandlerConsumerF1, NULL);
-	// 	sigHandlerConsumerF1();
-	// 	pthread_join(thread2, NULL);
-	// } else if ( id == 5 ){
+
+	//P4
+	else if ( id == 4 ){
+		thread1p4Id = gettid(); //Defino TID da thread principal do p4
+		
+		pthread_t thread2;
+		pthread_create(&thread2, NULL, p4SignalReceiver, NULL);
+		p4SignalReceiver();
+		pthread_join(thread2, NULL);
+	
+	} 
+	// else if ( id == 5 ){
 	// 	producerF2(1);
 	// } else if ( id == 6 ){
 	// 	producerF2(2);
@@ -175,7 +186,7 @@ int createChildren() {
 			exit(-1);
 		}
 		if ( p == 0 ) {
-			printf("%d\t%d\n", getpid(), id);
+			printf("p%d  --> %d\n", id, getpid());
 			return id;
 		}
 		*(pids+id) = p; //Pai recebe PID do filho criado e insere valor no vetor pids
@@ -187,22 +198,33 @@ int createChildren() {
 	return 0;
 }
 
-//p1, p2 e p3 produzem elementos aleatorios para F1
+//p1, p2 e p3 produzem elementos aleatórios para F1
 void producerF1() {
 	int response, random;
 	srand(getpid() + F1->lst); //Seed para função random() sempre muda dessa forma
 	while(1) {
+
+		sem_wait((sem_t*)&flagF1->mutex);
+		if (flagF1->flag == 1){
+			sem_post((sem_t*)&flagF1->mutex);	
+			break; //Se a fila já estiver sendo consumida, não posso produzir
+		} 
+		sem_post((sem_t*)&flagF1->mutex);
+
 		random = rand()%1000; //Gera número aleatório entre 1 e 1000
 		response = push(F1, random); //Tenta inserir na F1
-		if(response == 1) {
-			printf("Ultimo elemento inserido\n");
+
+		if(response == 1) { //Último elemento inserido na fila
+
+			while(kill(*(pids+4), SIGUSR1) == -1); //Tento enviar sinal para p4 consumir até ter sucesso
 			break;
-		} else if (response == -1) 
+
+		} else if (response == -1) //Fila cheia
 			break;
 	}
 }
 
-//Tenta inserir elemento value na fila queue
+//Tenta inserir elemento "value" na fila "queue"
 int push (Queue queue, int value) {
 	sem_wait((sem_t*)&queue->mutex);
 	
@@ -214,6 +236,7 @@ int push (Queue queue, int value) {
 	queue->array[queue->lst] = value; printf("%d insere %d na F1 na posicao: %d\n", getpid(), value, queue->lst);
 	queue->lst = next(queue->lst);
 	queue->count++;
+
 	//Caso inserção encheu a fila, flagSendSignal == 1
 	int flagSendSignal = isFull(queue); 
 	
@@ -231,53 +254,42 @@ int next (int position) {
 	return (position + 1) % QUEUE_SZ; //Inserção circular
 }
 
-int isEmpty (Queue queue) {
-	return queue->count == 0;
+//Threads de p4 aguardam envio do sinal dos produtores
+void* p4SignalReceiver() {
+	if (gettid() == thread1p4Id) {
+		signal(SIGUSR1, (__sighandler_t) setFlagF1ToConsume);
+		pause();
+	}
+
+	//Enquanto a fila não estiver pronta para consumo, não fazer nada
+	while(1) {
+		sem_wait((sem_t*)&flagF1->mutex);
+		if (flagF1->flag == 1) { //F1 pronta pra consumo
+			sem_post((sem_t*)&flagF1->mutex);
+			break;
+		}
+		sem_post((sem_t*)&flagF1->mutex);
+	}
+	
+	consumerF1();
 }
 
-int pop (Queue queue, int * value) {
-	sem_wait((sem_t*)&queue->mutex);
-	if (isEmpty(queue)) {
-		sem_post((sem_t*)&queue->mutex);
-		return -1;
-	}
-	*value = queue->array[queue->fst];
-	queue->fst = next(queue->fst);
-	queue->count--;
-	
-	if (getpid() == *(pids+7)) {
-		printf("%d remove %d da F2\n", getpid(), *value);
-	} else {
-		printf("%d remove %d da F1\n", getpid(), *value);
-	}
-	sem_post((sem_t*)&queue->mutex);
-	return 0;	
+//Bloqueia produtores de continuarem produzindo ao retirar elementos da F1
+void* setFlagF1ToConsume() {
+	sem_wait((sem_t*)&flagF1->mutex);
+	flagF1->flag = 1; //Não produza mais! F1 pode ser consumida
+	sem_post((sem_t*)&flagF1->mutex);
 }
 
-// void* sigHandlerConsumerF1() {
-// 	if (gettid() == thread1p4Id) {
-
-// 		for (int i = 1; i < 4; ++i)
-// 			while(kill(*(pids+i), SIGUSR2) == -1);
-
-// 		signal(SIGUSR1, (__sighandler_t) consumerF1);
-// 		pause();
-// 		flagp4 = 1;
-// 	}
-
-// 	while(flagp4 == 0);
-	
-// 	consumerF1();
-// }
-
-void* consumerF1() {
+//p4 (dualThread) consome F1 e insere elementos nas pipes
+void consumerF1() {
 	int response, value;
 	while(1) {
 		response = pop(F1, &value);
 		if (response == 0) {
 			
 			if (thread1p4Id == gettid())
-				write(pipe01[1], &value, sizeof(int));	
+				write(pipe01[1], &value, sizeof(int));
 			else 
 				write(pipe02[1], &value, sizeof(int));
 
@@ -285,6 +297,28 @@ void* consumerF1() {
 		} else if (response == -1) 
 			break;
 	}
+}
+
+//Tenta retirar um elemento da fila "queue" e inserir em "value" passado por referência
+int pop (Queue queue, int * value) {
+	sem_wait((sem_t*)&queue->mutex);
+
+	if (isEmpty(queue)) {
+		sem_post((sem_t*)&queue->mutex);
+		return -1;
+	}
+
+	*value = queue->array[queue->fst]; printf("%d remove %d da F1\n", getpid(), *value);
+	queue->fst = next(queue->fst);
+	queue->count--;
+
+	sem_post((sem_t*)&queue->mutex);
+	return 0;
+}
+
+//Verifica se fila está vazia
+int isEmpty (Queue queue) {
+	return queue->count == 0;
 }
 
 void producerF2(int pipe) {
