@@ -22,23 +22,34 @@ struct queue_t {
 };
 typedef struct queue_t * Queue;
 
-//Estrutura das flags utilizadas para controle de produção e consumo das filas
-struct flag {
+//Estrutura da flag utilizada para controle de produção e consumo da F1
+struct flagF1_t {
 	sem_t mutex;
 	int flag; // 0=Produzir || 1=Consumir 
 };
-typedef struct flag * Flag;
+typedef struct flagF1_t * Flag1;
+
+//Estrutura da flag utilizada para controle de produção e consumo da F2 e métricas do código
+struct flagF2_t {
+	sem_t mutex;
+	int flag; // 0=Produzir || 1=Consumir 
+	int counterP5, counterP6;
+	int lower, higher, mode;
+};
+typedef struct flagF2_t * Flag2;
 
 //Quantidade de bytes para definição das shared memories 
 #define SM_QUEUE_SZ sizeof(struct queue_t) 
 #define SM_PIDS_SZ  PIDS_SZ*sizeof(int)
+#define SM_FLAG1_SZ sizeof(struct flagF1_t)
+#define SM_FLAG2_SZ sizeof(struct flagF2_t)
 
 Queue F1; //Ponteiro para F1 (shared memory)
 Queue F2; //Ponteiro para F2 (shared memory)
 int* pids; //Vetor com PIDs de todos os processos [pai,p1,p2,p3,p4,p5,p6,p7] (shared memory)
 long int thread1p4Id; //TID da thread original do P4
-Flag flagF1;
-Flag flagF2;
+Flag1 flagF1; //Ponteiro para flag de controle de consumo e produção da F1
+Flag2 flagF2; //Ponteiro para flag de controle de consumo e produção da F2
 int pipe01[2];
 int pipe02[2];
 
@@ -57,7 +68,7 @@ int   next (int position);
 void* p4SignalReceiver();
 int   pop (Queue queue, int * value);
 void  producerF1();
-// void  producerF2(int pipe);
+void  producerF2(int process, int * counter);
 int   push (Queue queue, int value);
 void* setFlagF1ToConsume();
 
@@ -69,7 +80,8 @@ int main () {
 	createSharedMemory(1, SM_QUEUE_SZ, random()); //F1
 	createSharedMemory(2, SM_QUEUE_SZ, random()); //F2
 	createSharedMemory(3, SM_PIDS_SZ,  random()); //pids
-	createSharedMemory(4, sizeof(int), random()); //flagF1
+	createSharedMemory(4, SM_FLAG1_SZ, random()); //flagF1
+	createSharedMemory(5, SM_FLAG2_SZ, random()); //flagF2
 
 	//Inicialização das pipes
 	createPipes();
@@ -79,10 +91,10 @@ int main () {
 
 	//P1, P2, P3
 	if ( id <= 3 ){
-
-		//Garante que o p4 chegue em p4SignalReceiver, antes dos produtores enviarem o sinal para consumo
-		sleep(1); 
 		
+		//Garante que o p4 chegue em p4SignalReceiver, antes dos produtores enviarem o sinal para consumo		
+		sleep(1); 
+
 		producerF1();
 	}
 
@@ -94,13 +106,14 @@ int main () {
 		pthread_create(&thread2, NULL, p4SignalReceiver, NULL);
 		p4SignalReceiver();
 		pthread_join(thread2, NULL);
-	
 	} 
-	// else if ( id == 5 ){
-	// 	producerF2(1);
-	// } else if ( id == 6 ){
-	// 	producerF2(2);
-	// } else if ( id == 7 ){
+
+	//P5, P6
+	else if ( id == 5 || id == 6){
+		producerF2(id, id==5 ? &(flagF2->counterP5) : &(flagF2->counterP6));
+	}
+
+	 // else if ( id == 7 ){
 	// 	pthread_t tids[2];
 	// 	for (int i = 0; i < 2; i++) 
 	//         pthread_create(&tids[i], NULL, consumerF2, NULL);
@@ -117,7 +130,8 @@ int main () {
 //	1 = Ponteiro para F1
 //  2 = Ponteiro para F2
 //  3 = Ponteiro para vetor de PIDs
-//  4 = Ponteiro para flag de controle de fila
+//  4 = Ponteiro para flag de controle da F1
+//  5 = Ponteiro para flag de controle da F2
 void createSharedMemory (int type, int sharedMemorySize, int keySM) {
 	key_t key = keySM;
 	void *sharedMemory = (void *)0;
@@ -146,9 +160,18 @@ void createSharedMemory (int type, int sharedMemorySize, int keySM) {
   		pids = (int *) sharedMemory;
   		*(pids) = getpid(); // pids[0] = Pid do processo pai
   	} else if (type == 4) {
-  		flagF1 = (Flag) sharedMemory;
+  		flagF1 = (Flag1) sharedMemory;
   		flagF1->flag = 0;
   		createSemaphore(&flagF1->mutex);
+  	} else if (type == 5) {
+  		flagF2 = (Flag2) sharedMemory;
+  		flagF2->flag = 0;
+  		flagF2->counterP5 = 0;
+  		flagF2->counterP6 = 0;
+  		flagF2->lower = 0;
+  		flagF2->higher = 0;
+  		flagF2->mode = 0;
+  		createSemaphore(&flagF2->mutex);
   	}
 }
 
@@ -233,7 +256,14 @@ int push (Queue queue, int value) {
 		return -1;
 	}
 
-	queue->array[queue->lst] = value; printf("%d insere %d na F1 na posicao: %d\n", getpid(), value, queue->lst);
+	queue->array[queue->lst] = value; 
+	if (queue == F1) {
+		printf("%d insere %d na F1 na posicao: %d\n", getpid(), value, queue->lst);	
+	} else {
+		printf("%d insere %d na F2 na posicao: %d\n", getpid(), value, queue->lst);	
+	}
+	
+	
 	queue->lst = next(queue->lst);
 	queue->count++;
 
@@ -281,7 +311,7 @@ void* setFlagF1ToConsume() {
 	sem_post((sem_t*)&flagF1->mutex);
 }
 
-//p4 (dualThread) consome F1 e insere elementos nas pipes
+//p4 (dualThread) consome F1 e escreve elementos nas pipes
 void consumerF1() {
 	int response, value;
 	while(1) {
@@ -293,7 +323,6 @@ void consumerF1() {
 			else 
 				write(pipe02[1], &value, sizeof(int));
 
-			// printf("%ld insere na pipe %d\n", gettid(), value);
 		} else if (response == -1) 
 			break;
 	}
@@ -308,7 +337,14 @@ int pop (Queue queue, int * value) {
 		return -1;
 	}
 
-	*value = queue->array[queue->fst]; printf("%d remove %d da F1\n", getpid(), *value);
+	*value = queue->array[queue->fst]; 
+
+	if (queue == F1) {
+		printf("%d remove %d da F1\n", getpid(), *value);	
+	} else {
+		printf("%d remove %d da F2\n", getpid(), *value);	
+	}
+	
 	queue->fst = next(queue->fst);
 	queue->count--;
 
@@ -321,22 +357,42 @@ int isEmpty (Queue queue) {
 	return queue->count == 0;
 }
 
-void producerF2(int pipe) {
+//Lê elementos das pipes e insere em F2
+void producerF2(int process, int * counter) {
+	
 	int value, resp, response;
-	while(1) {
-		
-		if (pipe == 1) {
-			resp = read(pipe01[0], &value, sizeof(int));
-		} else if (pipe == 2) {
-			resp = read(pipe02[0], &value, sizeof(int));
-		}
 
+	while(1) {
+		sem_wait((sem_t*)&flagF2->mutex);
+
+		//Se já produziu todos elementos da pipe, encerrar P5 e P6
+		if (flagF2->counterP5 + flagF2->counterP6 >= 10)  { 
+			sem_post((sem_t*)&flagF2->mutex);
+			break;
+		}
+		
+		if (process == 5) 
+			resp = read(pipe01[0], &value, sizeof(int)); //Tentativa de leitura de pipe01
+		else if (process == 6) 
+			resp = read(pipe02[0], &value, sizeof(int)); //Tentativa de leitura de pipe02	
+		
 		if(resp == -1) {
-			printf("Erro na leitura do pipe0%d\n", pipe);
-		} else if (resp > 0) {
-			response = push(F2, value);
-			if (response == -1) 
-				break; 
+			
+			printf("Erro na leitura do pipe0%d\n", process-4);
+			sem_post((sem_t*)&flagF2->mutex);
+			break;
+
+		} else if (resp > 0) { 
+			
+			response = push(F2, value); //Tento colocar na F2
+			
+			if (response == -1){
+				sem_post((sem_t*)&flagF2->mutex);
+				break;
+			} 
+			
+			counter++; //Se tiver sucesso, contabilizo um elemento a mais pro processo
+			sem_post((sem_t*)&flagF2->mutex);
 		}
 	}
 }
