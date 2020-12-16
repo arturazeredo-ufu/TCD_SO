@@ -37,11 +37,11 @@ Queue F1; //Ponteiro para F1 (shared memory)
 Queue F2; //Ponteiro para F2 (shared memory)
 int* pids; //Vetor com PIDs de todos os processos [pai,p1,p2,p3,p4,p5,p6,p7] (shared memory)
 long int thread1p4Id; //TID da thread original do P4
-
+Flag flagF1;
+Flag flagF2;
 int pipe01[2];
 int pipe02[2];
 
-// int flagp4;
 
 //Protótipos das funções
 void* consumerF1(); 
@@ -106,6 +106,7 @@ int main () {
 //	1 = Ponteiro para F1
 //  2 = Ponteiro para F2
 //  3 = Ponteiro para vetor de PIDs
+//  4 = Ponteiro para flag de controle de fila
 void createSharedMemory (int type, int sharedMemorySize, int keySM) {
 	key_t key = keySM;
 	void *sharedMemory = (void *)0;
@@ -133,7 +134,11 @@ void createSharedMemory (int type, int sharedMemorySize, int keySM) {
   	} else if (type == 3) {
   		pids = (int *) sharedMemory;
   		*(pids) = getpid(); // pids[0] = Pid do processo pai
-  	}	
+  	} else if (type == 4) {
+  		flagF1 = (Flag) sharedMemory;
+  		flagF1->flag = 0;
+  		createSemaphore(&flagF1->mutex);
+  	}
 }
 
 //Inicializa todos os valores da struct queue_t
@@ -163,7 +168,6 @@ int createChildren() {
 	pid_t p;
 	int id;
 
-	sem_wait((sem_t*)&F1->mutex); //Pai trava semáforo para criar todos os filhos
 	for(id=1; id<=7; id++){
 		p = fork();
 		if ( p < 0 ) {
@@ -172,69 +176,63 @@ int createChildren() {
 		}
 		if ( p == 0 ) {
 			printf("%d\t%d\n", getpid(), id);
-			sem_wait((sem_t*)&F1->mutex); //Filhos esperam liberação do semáforo
 			return id;
 		}
 		*(pids+id) = p; //Pai recebe PID do filho criado e insere valor no vetor pids
 	}
 
-	for (int i = 0; i < 8; ++i)
-		sem_post((sem_t*)&F1->mutex); //Pai libera semáforo para todos os filhos partirem sincronizados 
-	
 	for (int i = 0; i < 7; i++)
 		wait(NULL); //Pai espera o fim da execução de todos os filhos
 	
 	return 0;
 }
 
+//p1, p2 e p3 produzem elementos aleatorios para F1
 void producerF1() {
-
 	int response, random;
-	srand(getpid() + F1->lst);
+	srand(getpid() + F1->lst); //Seed para função random() sempre muda dessa forma
 	while(1) {
-		random = rand()%1000;
-		response = push(F1, random);
+		random = rand()%1000; //Gera número aleatório entre 1 e 1000
+		response = push(F1, random); //Tenta inserir na F1
 		if(response == 1) {
-			while(kill(*(pids+4), SIGUSR1) == -1);
+			printf("Ultimo elemento inserido\n");
 			break;
 		} else if (response == -1) 
 			break;
 	}
 }
 
-int isFull (Queue queue) {
-	return queue->count == QUEUE_SZ;
-}
-
-int isEmpty (Queue queue) {
-	return queue->count == 0;
-}
-
-int next (int position) {
-	return (position + 1) % QUEUE_SZ;
-}
-
+//Tenta inserir elemento value na fila queue
 int push (Queue queue, int value) {
 	sem_wait((sem_t*)&queue->mutex);
+	
 	if (isFull(queue)) {
 		sem_post((sem_t*)&queue->mutex);	
 		return -1;
 	}
 
-	if (getpid() <= *(pids+3)) {
-		printf("%d insere %d na F1\n", getpid(), value);
-	} else {
-		printf("%d insere %d na F2\n", getpid(), value);
-	}
-	
-
-	queue->array[queue->lst] = value;
+	queue->array[queue->lst] = value; printf("%d insere %d na F1 na posicao: %d\n", getpid(), value, queue->lst);
 	queue->lst = next(queue->lst);
 	queue->count++;
-	int flagSendSignal = isFull(queue);
+	//Caso inserção encheu a fila, flagSendSignal == 1
+	int flagSendSignal = isFull(queue); 
+	
 	sem_post((sem_t*)&queue->mutex);
-
 	return flagSendSignal;
+}
+
+//Verifica se fila está cheia
+int isFull (Queue queue) {
+	return queue->count == QUEUE_SZ;
+}
+
+//Calcula próxima posição livre para realizar a inserção 
+int next (int position) {
+	return (position + 1) % QUEUE_SZ; //Inserção circular
+}
+
+int isEmpty (Queue queue) {
+	return queue->count == 0;
 }
 
 int pop (Queue queue, int * value) {
