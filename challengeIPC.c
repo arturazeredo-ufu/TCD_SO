@@ -78,7 +78,6 @@ void  printResult();
 
 int main () {
 	clock_t begin = clock();
-	printf("pai --> %d\n", getpid());
 
 	//Criação e inicialização das Shared Memories
 	srand(time(NULL));
@@ -453,10 +452,6 @@ void* consumerF2() {
 			flagF2->counterEach[value]++; //Incrementa 1 na posição correspondente ao elemento aleatório processado por p7
 			
 			if (flagF2->counterTotal == AMOUNT_DATA)  { //Se processei quantidade total de elementos que desejo
-				sem_destroy(&flagF1->mutex);
-				sem_destroy(&flagF2->mutex);
-				sem_destroy(&F1->mutex);
-				sem_destroy(&F2->mutex);
 				for (int i = 1; i <= 7; ++i) {
 					kill(*(pids+i), SIGTERM) == -1; //Mato todos os filhos e me suicido
 				}
