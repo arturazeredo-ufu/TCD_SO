@@ -77,7 +77,7 @@ void  setFlagF1ToProduce();
 void  printResult();
 
 int main () {
-	// clock_t begin = clock();
+	clock_t begin = clock();
 	printf("pai --> %d\n", getpid());
 
 	//Criação e inicialização das Shared Memories
@@ -94,8 +94,15 @@ int main () {
 	//Cria processos filhos
 	int id = createChildren();
 
+
+	//Processo pai
+	if ( id == 0 ) {
+		clock_t end = clock();
+		printResult((double)(end - begin) / CLOCKS_PER_SEC);
+	}	
+
 	//P1, P2, P3
-	if ( id <= 3 ){
+	else if ( id <= 3 ){
 		while(1) {
 			producerF1();
 		}
@@ -125,14 +132,7 @@ int main () {
 	    for (int i = 0; i < 2; ++i) {
 			pthread_join(tids[i], NULL);
 	    }
-	}	
-
-	//Processo pai
-	else if ( id == 0 ) {
-		printf("opa\n");
-		// clock_t end = clock();
-		// printResult((double)(end - begin) / CLOCKS_PER_SEC);
-	}	
+	}
 
 	return 0;
 }
@@ -255,7 +255,7 @@ void producerF1() {
 
 		if(response == 1) { //Último elemento inserido na fila
 
-			kill(*(pids+4), SIGUSR1) == -1; //Tento enviar sinal para p4 consumir até ter sucesso
+			while(kill(*(pids+4), SIGUSR1) == -1); //Tento enviar sinal para p4 consumir até ter sucesso
 			break;
 
 		} else if (response == -1) //Fila cheia
@@ -458,11 +458,11 @@ void* consumerF2() {
 				sem_destroy(&F1->mutex);
 				sem_destroy(&F2->mutex);
 				for (int i = 1; i <= 7; ++i) {
-					kill(*(pids+i), SIGTERM) == -1; //Mato todos os filhos
+					kill(*(pids+i), SIGTERM) == -1; //Mato todos os filhos e me suicido
 				}
 			}
 			
-			sem_post((sem_t*)&flagF2->mutex);	
+			sem_post((sem_t*)&flagF2->mutex);
 		}
 	}
 }
