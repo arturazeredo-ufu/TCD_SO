@@ -13,6 +13,8 @@
 #define gettid() syscall(SYS_gettid)
 #define QUEUE_SZ 10 //Tamanho das filas (F1 e F2)
 #define PIDS_SZ  8  //Tamanho do vetor com PIDs de todos os processos
+#define AMOUNT_DATA 10 //Quantidade de elementos que devem ser processados por p7
+#define INTERVAL 1000
 
 //Estrutura das filas 1 e 2
 struct queue_t { 
@@ -32,9 +34,10 @@ typedef struct flagF1_t * Flag1;
 //Estrutura da flag utilizada para controle de produção e consumo da F2 e métricas do código
 struct flagF2_t {
 	sem_t mutex;
-	int flag; // 0=Produzir || 1=Consumir 
-	int counterP5, counterP6;
-	int lower, higher, mode;
+	int flag; // 1 = Encerrar p5 e p6, pois p7 já processou quantidade necessária de elementos
+	int counterP5, counterP6; //Contadores com a quantidade de elementos processados por p5 e p6. item (b)
+	int counterTotal; //Contador de elementos para threads do P7
+	int counterEach[INTERVAL+1]; //Vetor com a quantidade de cada número aleatório processado por p7. item (c)
 };
 typedef struct flagF2_t * Flag2;
 
@@ -53,10 +56,9 @@ Flag2 flagF2; //Ponteiro para flag de controle de consumo e produção da F2
 int pipe01[2];
 int pipe02[2];
 
-
 //Protótipos das funções
 void  consumerF1(); 
-// void* consumerF2();
+void* consumerF2();
 int   createChildren();
 void  createPipes();
 void  createSemaphore (sem_t * semaphore);
@@ -68,12 +70,14 @@ int   next (int position);
 void* p4SignalReceiver();
 int   pop (Queue queue, int * value);
 void  producerF1();
-void  producerF2(int process, int * counter);
+void  producerF2(int process);
 int   push (Queue queue, int value);
 void* setFlagF1ToConsume();
 void  setFlagF1ToProduce();
+void  printResult();
 
 int main () {
+	// clock_t begin = clock();
 	printf("pai --> %d\n", getpid());
 
 	//Criação e inicialização das Shared Memories
@@ -107,21 +111,28 @@ int main () {
 		pthread_join(thread2, NULL);
 	} 
 
-	// //P5, P6
-	// else if ( id == 5 || id == 6){
-	// 	producerF2(id, id==5 ? &(flagF2->counterP5) : &(flagF2->counterP6));
-	// }
+	//P5, P6
+	else if ( id == 5 || id == 6){
+		producerF2(id);
+	}
 
-	// //P7
-	// else if ( id == 7 ){
-	// 	pthread_t tids[2];
-	// 	for (int i = 0; i < 2; i++) 
-	//         pthread_create(&tids[i], NULL, consumerF2, NULL);
-	//     consumerF2();
-	//     for (int i = 0; i < 2; ++i) {
-	// 		pthread_join(tids[i], NULL);
-	//     }
-	// }	
+	//P7
+	else if ( id == 7 ){
+		pthread_t tids[2];
+		for (int i = 0; i < 2; i++) 
+	        pthread_create(&tids[i], NULL, consumerF2, NULL);
+	    consumerF2();
+	    for (int i = 0; i < 2; ++i) {
+			pthread_join(tids[i], NULL);
+	    }
+	}	
+
+	//Processo pai
+	else if ( id == 0 ) {
+		printf("opa\n");
+		// clock_t end = clock();
+		// printResult((double)(end - begin) / CLOCKS_PER_SEC);
+	}	
 
 	return 0;
 }
@@ -161,16 +172,9 @@ void createSharedMemory (int type, int sharedMemorySize, int keySM) {
   		*(pids) = getpid(); // pids[0] = Pid do processo pai
   	} else if (type == 4) {
   		flagF1 = (Flag1) sharedMemory;
-  		flagF1->flag = 0;
   		createSemaphore(&flagF1->mutex);
   	} else if (type == 5) {
   		flagF2 = (Flag2) sharedMemory;
-  		flagF2->flag = 0;
-  		flagF2->counterP5 = 0;
-  		flagF2->counterP6 = 0;
-  		flagF2->lower = 0;
-  		flagF2->higher = 0;
-  		flagF2->mode = 0;
   		createSemaphore(&flagF2->mutex);
   	}
 }
@@ -229,7 +233,7 @@ int createChildren() {
 	for (int i = 0; i < 7; i++){
 		wait(NULL); //Pai espera o fim da execução de todos os filhos
 	}
-	
+
 	return 0;
 }
 
@@ -246,12 +250,12 @@ void producerF1() {
 		} 
 		sem_post((sem_t*)&flagF1->mutex);
 
-		random = rand()%1000; //Gera número aleatório entre 1 e 1000
+		random = rand()%INTERVAL; //Gera número aleatório entre 1 e 1000
 		response = push(F1, random); //Tenta inserir na F1
 
 		if(response == 1) { //Último elemento inserido na fila
 
-			while(kill(*(pids+4), SIGUSR1) == -1); //Tento enviar sinal para p4 consumir até ter sucesso
+			kill(*(pids+4), SIGUSR1) == -1; //Tento enviar sinal para p4 consumir até ter sucesso
 			break;
 
 		} else if (response == -1) //Fila cheia
@@ -269,11 +273,11 @@ int push (Queue queue, int value) {
 	}
 
 	queue->array[queue->lst] = value; 
-	if (queue == F1) {
-		printf("%d insere %d na F1 na posicao: %d\n", getpid(), value, queue->lst);	
-	} else {
-		printf("%d insere %d na F2 na posicao: %d\n", getpid(), value, queue->lst);	
-	}
+	// if (queue == F1) {
+	// 	printf("%d insere %d na F1 na posicao: %d\n", getpid(), value, queue->lst);	
+	// } else {
+	// 	// printf("%d insere %d na F2 na posicao: %d\n", getpid(), value, queue->lst);	
+	// }
 	
 	
 	queue->lst = next(queue->lst);
@@ -334,11 +338,11 @@ void consumerF1() {
 		if (response == 0) {
 			
 			if (thread1p4Id == gettid()){
-				printf("%ld mandou %d pra pipe01\n", gettid(), value);
+				// printf("%ld mandou %d pra pipe01\n", gettid(), value);
 				write(pipe01[1], &value, sizeof(int));
 			}
 			else {
-				printf("%ld mandou %d pra pipe02\n", gettid(), value);
+				// printf("%ld mandou %d pra pipe02\n", gettid(), value);
 				write(pipe02[1], &value, sizeof(int));
 			}
 
@@ -384,18 +388,19 @@ int isEmpty (Queue queue) {
 }
 
 //Lê elementos das pipes e insere em F2
-void producerF2(int process, int * counter) {
+void producerF2(int process) {
 	
 	int value, resp, response;
 
 	while(1) {
-		sem_wait((sem_t*)&flagF2->mutex);
 
 		//Se já produziu todos elementos da pipe, encerrar P5 e P6
-		if (flagF2->counterP5 + flagF2->counterP6 >= 10)  { 
+		sem_wait((sem_t*)&flagF2->mutex);
+		if (flagF2->flag)  { 
 			sem_post((sem_t*)&flagF2->mutex);
 			break;
 		}
+		sem_post((sem_t*)&flagF2->mutex);
 		
 		if (process == 5) 
 			resp = read(pipe01[0], &value, sizeof(int)); //Tentativa de leitura de pipe01
@@ -405,22 +410,30 @@ void producerF2(int process, int * counter) {
 		if(resp == -1) {
 			
 			printf("Erro na leitura do pipe0%d\n", process-4);
-			sem_post((sem_t*)&flagF2->mutex);
 			break;
 
 		} else if (resp > 0) { 
+
+			//Se já produziu todos elementos da pipe, encerrar p5 e p6
+			//Double check pois pode ter dado read antes de p7 alterar a flag
+			sem_wait((sem_t*)&flagF2->mutex);
+			if (flagF2->flag)  { 
+				sem_post((sem_t*)&flagF2->mutex);
+				break;
+			}
+			sem_post((sem_t*)&flagF2->mutex);
 			
 			response = push(F2, value); //Tento colocar na F2
 			
-			if (response == -1){
-				sem_post((sem_t*)&flagF2->mutex);
+			if (response == -1)
 				break;
-			} 
 			
-			(*counter)++; //Se tiver sucesso, contabilizo um elemento a mais pro processo
-			printf("counterP5: %d\t", flagF2->counterP5);
-			printf("counterP6: %d\n", flagF2->counterP6);
-			sem_post((sem_t*)&flagF2->mutex);
+			//Incrementa contador de elementos processados por p5 ou p6
+			if(process == 5) flagF2->counterP5++;
+			else if (process == 6) flagF2->counterP6++;
+
+			// printf("counterP5: %d\t", flagF2->counterP5);
+			// printf("counterP6: %d\n", flagF2->counterP6);
 		}
 	}
 }
@@ -428,10 +441,63 @@ void producerF2(int process, int * counter) {
 void* consumerF2() {
 	int value, response;
 	while(1) {
+
 		response = pop(F2, &value);
+
 		if (response == 0) {
+			sem_wait((sem_t*)&flagF2->mutex);
+			
+			flagF2->counterTotal++;
 			printf("%d retirado da F2\n", value);
-		} else if (response == -1) 
-			break;
+
+			flagF2->counterEach[value]++; //Incrementa 1 na posição correspondente ao elemento aleatório processado por p7
+			
+			if (flagF2->counterTotal == AMOUNT_DATA)  { //Se processei quantidade total de elementos que desejo
+				sem_destroy(&flagF1->mutex);
+				sem_destroy(&flagF2->mutex);
+				sem_destroy(&F1->mutex);
+				sem_destroy(&F2->mutex);
+				for (int i = 1; i <= 7; ++i) {
+					kill(*(pids+i), SIGTERM) == -1; //Mato todos os filhos
+				}
+			}
+			
+			sem_post((sem_t*)&flagF2->mutex);	
+		}
 	}
+}
+
+void printResult(double timeSpent) {
+	printf("\na)\n\t*Tempo de execucao do programa: %lf\n", timeSpent);
+
+	printf("\nb)\n\t*Quantidade de valores processados por p5: %d\n", flagF2->counterP5);
+	printf("\t*Quantidade de valores processados por p6: %d\n", flagF2->counterP6);
+	
+	int mode = 0;
+	int higher = flagF2->counterEach[0];
+	for (int i = 0; i <= INTERVAL+1; ++i) {
+		if (higher < flagF2->counterEach[i]) {
+			higher = flagF2->counterEach[i];
+			mode = i;
+		}
+	}
+	printf("\nc)\n\t*Moda: %d\n", mode);
+
+	int min;
+	for (int i = 0; i <= INTERVAL+1; ++i) {
+		if (flagF2->counterEach[i] > 0) {
+			min = i;
+			break;
+		}
+	}
+	printf("\t*Valor minimo: %d\n", min);
+
+	int max;
+	for (int i = INTERVAL+1; i >= 0; --i) {
+		if (flagF2->counterEach[i] > 0) {
+			max = i;
+			break;
+		}
+	}
+	printf("\t*Valor maximo: %d\n", max);
 }
