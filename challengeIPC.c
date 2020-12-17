@@ -71,6 +71,7 @@ void  producerF1();
 void  producerF2(int process, int * counter);
 int   push (Queue queue, int value);
 void* setFlagF1ToConsume();
+void  setFlagF1ToProduce();
 
 int main () {
 	printf("pai --> %d\n", getpid());
@@ -91,11 +92,9 @@ int main () {
 
 	//P1, P2, P3
 	if ( id <= 3 ){
-		
-		//Garante que o p4 chegue em p4SignalReceiver, antes dos produtores enviarem o sinal para consumo		
-		sleep(1); 
-
-		producerF1();
+		while(1) {
+			producerF1();
+		}
 	}
 
 	//P4
@@ -108,12 +107,13 @@ int main () {
 		pthread_join(thread2, NULL);
 	} 
 
-	//P5, P6
-	else if ( id == 5 || id == 6){
-		producerF2(id, id==5 ? &(flagF2->counterP5) : &(flagF2->counterP6));
-	}
+	// //P5, P6
+	// else if ( id == 5 || id == 6){
+	// 	producerF2(id, id==5 ? &(flagF2->counterP5) : &(flagF2->counterP6));
+	// }
 
-	 // else if ( id == 7 ){
+	// //P7
+	// else if ( id == 7 ){
 	// 	pthread_t tids[2];
 	// 	for (int i = 0; i < 2; i++) 
 	//         pthread_create(&tids[i], NULL, consumerF2, NULL);
@@ -202,6 +202,7 @@ int createChildren() {
 	pid_t p;
 	int id;
 
+	sem_wait((sem_t*)&F1->mutex); //Pai fecha semáforo
 	for(id=1; id<=7; id++){
 		p = fork();
 		if ( p < 0 ) {
@@ -209,14 +210,25 @@ int createChildren() {
 			exit(-1);
 		}
 		if ( p == 0 ) {
+			if ( id != 4 ) {
+				//Processos != p4 esperam a criação dos demais filhos
+				//p4 deve chegar no pause() antes que p1, p2 e p3 preencham a fila, 
+				//por isso não espera a criação dos demais
+				sem_wait((sem_t*)&F1->mutex); 
+			}
 			printf("p%d  --> %d\n", id, getpid());
 			return id;
 		}
 		*(pids+id) = p; //Pai recebe PID do filho criado e insere valor no vetor pids
 	}
 
-	for (int i = 0; i < 7; i++)
+	for (int i = 0; i < 7; ++i) {
+		sem_post((sem_t*)&F1->mutex); //Pai libera todos os filhos
+	}
+
+	for (int i = 0; i < 7; i++){
 		wait(NULL); //Pai espera o fim da execução de todos os filhos
+	}
 	
 	return 0;
 }
@@ -286,22 +298,25 @@ int next (int position) {
 
 //Threads de p4 aguardam envio do sinal dos produtores
 void* p4SignalReceiver() {
-	if (gettid() == thread1p4Id) {
-		signal(SIGUSR1, (__sighandler_t) setFlagF1ToConsume);
-		pause();
-	}
-
-	//Enquanto a fila não estiver pronta para consumo, não fazer nada
 	while(1) {
-		sem_wait((sem_t*)&flagF1->mutex);
-		if (flagF1->flag == 1) { //F1 pronta pra consumo
-			sem_post((sem_t*)&flagF1->mutex);
-			break;
+		if (gettid() == thread1p4Id) {
+			signal(SIGUSR1, (__sighandler_t) setFlagF1ToConsume);
+			pause();
 		}
-		sem_post((sem_t*)&flagF1->mutex);
+
+		//Enquanto a fila não estiver pronta para consumo, não fazer nada
+		while(1) {
+			sem_wait((sem_t*)&flagF1->mutex);
+			if (flagF1->flag == 1) { //F1 pronta pra consumo
+				sem_post((sem_t*)&flagF1->mutex);
+				break;
+			}
+			sem_post((sem_t*)&flagF1->mutex);
+		}
+		
+		consumerF1();
+		setFlagF1ToProduce();
 	}
-	
-	consumerF1();
 }
 
 //Bloqueia produtores de continuarem produzindo ao retirar elementos da F1
@@ -318,14 +333,25 @@ void consumerF1() {
 		response = pop(F1, &value);
 		if (response == 0) {
 			
-			if (thread1p4Id == gettid())
+			if (thread1p4Id == gettid()){
+				printf("%ld mandou %d pra pipe01\n", gettid(), value);
 				write(pipe01[1], &value, sizeof(int));
-			else 
+			}
+			else {
+				printf("%ld mandou %d pra pipe02\n", gettid(), value);
 				write(pipe02[1], &value, sizeof(int));
+			}
 
 		} else if (response == -1) 
 			break;
 	}
+}
+
+//Libera produtores para produzir elementos para F1
+void setFlagF1ToProduce() {
+	sem_wait((sem_t*)&flagF1->mutex);
+	flagF1->flag = 0; //Produza mais! F1 pode não pode ser consumida
+	sem_post((sem_t*)&flagF1->mutex);
 }
 
 //Tenta retirar um elemento da fila "queue" e inserir em "value" passado por referência
@@ -339,11 +365,11 @@ int pop (Queue queue, int * value) {
 
 	*value = queue->array[queue->fst]; 
 
-	if (queue == F1) {
-		printf("%d remove %d da F1\n", getpid(), *value);	
-	} else {
-		printf("%d remove %d da F2\n", getpid(), *value);	
-	}
+	// if (queue == F1) {
+	// 	printf("%d remove %d da F1\n", getpid(), *value);	
+	// } else {
+	// 	printf("%d remove %d da F2\n", getpid(), *value);	
+	// }
 	
 	queue->fst = next(queue->fst);
 	queue->count--;
@@ -391,7 +417,9 @@ void producerF2(int process, int * counter) {
 				break;
 			} 
 			
-			counter++; //Se tiver sucesso, contabilizo um elemento a mais pro processo
+			(*counter)++; //Se tiver sucesso, contabilizo um elemento a mais pro processo
+			printf("counterP5: %d\t", flagF2->counterP5);
+			printf("counterP6: %d\n", flagF2->counterP6);
 			sem_post((sem_t*)&flagF2->mutex);
 		}
 	}
