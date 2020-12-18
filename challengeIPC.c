@@ -13,7 +13,7 @@
 #define gettid() syscall(SYS_gettid)
 #define QUEUE_SZ 10 //Tamanho das filas (F1 e F2)
 #define PIDS_SZ  8  //Tamanho do vetor com PIDs de todos os processos
-#define AMOUNT_DATA 10 //Quantidade de elementos que devem ser processados por p7
+#define AMOUNT_DATA 1000 //Quantidade de elementos que devem ser processados por p7
 #define INTERVAL 1000
 
 //Estrutura das filas 1 e 2
@@ -272,11 +272,11 @@ int push (Queue queue, int value) {
 	}
 
 	queue->array[queue->lst] = value; 
-	// if (queue == F1) {
-	// 	printf("%d insere %d na F1 na posicao: %d\n", getpid(), value, queue->lst);	
-	// } else {
-	// 	// printf("%d insere %d na F2 na posicao: %d\n", getpid(), value, queue->lst);	
-	// }
+	if (queue == F1) {
+		printf("%d insere %d na F1 na posicao: %d\n", getpid(), value, queue->lst);	
+	} else {
+		// printf("%d insere %d na F2 na posicao: %d\n", getpid(), value, queue->lst);	
+	}
 	
 	
 	queue->lst = next(queue->lst);
@@ -426,13 +426,13 @@ void producerF2(int process) {
 			
 			if (response == -1)
 				break;
-			
-			//Incrementa contador de elementos processados por p5 ou p6
-			if(process == 5) flagF2->counterP5++;
-			else if (process == 6) flagF2->counterP6++;
-
-			// printf("counterP5: %d\t", flagF2->counterP5);
-			// printf("counterP6: %d\n", flagF2->counterP6);
+			else {
+				sem_wait((sem_t*)&flagF2->mutex);
+				//Incrementa contador de elementos processados por p5 ou p6
+				if(process == 5) flagF2->counterP5++;
+				else if (process == 6) flagF2->counterP6++;
+				sem_post((sem_t*)&flagF2->mutex);
+			}
 		}
 	}
 }
@@ -451,7 +451,7 @@ void* consumerF2() {
 
 			flagF2->counterEach[value]++; //Incrementa 1 na posição correspondente ao elemento aleatório processado por p7
 			
-			if (flagF2->counterTotal == AMOUNT_DATA)  { //Se processei quantidade total de elementos que desejo
+			if (flagF2->counterTotal >= AMOUNT_DATA)  { //Se processei quantidade total de elementos que desejo
 				for (int i = 1; i <= 7; ++i) {
 					kill(*(pids+i), SIGTERM) == -1; //Mato todos os filhos e me suicido
 				}
