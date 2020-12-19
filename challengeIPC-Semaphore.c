@@ -273,7 +273,7 @@ int push (Queue queue, int value) {
 
 	queue->array[queue->lst] = value; 
 	if (queue == F1) {
-		printf("%d insere %d na F1 na posicao: %d\n", getpid(), value, queue->lst);	
+		printf("%d insere %d na F1 na posicao: %d\n", getpid(), value, queue->count);	
 	} else {
 		// printf("%d insere %d na F2 na posicao: %d\n", getpid(), value, queue->lst);	
 	}
@@ -368,9 +368,10 @@ int pop (Queue queue, int * value) {
 
 	*value = queue->array[queue->fst]; 
 
-	// if (queue == F1) {
-	// 	printf("%d remove %d da F1\n", getpid(), *value);	
-	// } else {
+	if (queue == F1) {
+		printf("%d remove %d da F1\n", getpid(), *value);	
+	} 
+	// else {
 	// 	printf("%d remove %d da F2\n", getpid(), *value);	
 	// }
 	
