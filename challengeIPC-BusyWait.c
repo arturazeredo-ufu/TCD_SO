@@ -145,6 +145,9 @@ int main () {
 		for (int i = 0; i < 2; i++) 
 	        pthread_create(&tids[i], NULL, consumerF2, NULL);
 	    consumerF2();
+		
+		thread2p7Id=tids[0];
+		thread3p7Id=tids[1];
 
 	    for (int i = 0; i < 2; ++i) {
 			pthread_join(tids[i], NULL);
