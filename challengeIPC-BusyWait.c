@@ -72,11 +72,12 @@ int   	 isEmpty (Queue queue);
 int   	 isFull (Queue queue);
 int   	 next (int position);
 void* 	 p4SignalReceiver();
-int 	 pop (Queue queue, int * value);
-int   	 popF1 (Queue queue, int * value);
+int   	 popF1 (int * value);
+int 	 popF2 (int * value);
 void  	 producerF1();
 void  	 producerF2(int process);
-int   	 push (Queue queue, int value, int id, int mod);
+int   	 pushF1 (int value, int id, int mod);
+int      pushF2 (int value, int id, int mod);
 void* 	 setFlagF1ToConsume();
 void   	 setFlagF1ToProduce();
 void  	 printResult();
@@ -181,6 +182,7 @@ void createSharedMemory (int type, int sharedMemorySize, int keySM) {
   		createSemaphore(&flagF1->mutex);
   	} else if (type == 5) {
   		flagF2 = (Flag2) sharedMemory;
+  		F2->bwProd = 0;
   		createSemaphore(&flagF2->mutex);
   	}
 }
@@ -257,7 +259,7 @@ void producerF1(int id) {
 		sem_post((sem_t*)&flagF1->mutex);
 
 		random = rand()%INTERVAL; //Gera número aleatório entre 1 e 1000
-		response = push(F1, random, id-1, 3); //Tenta inserir na F1
+		response = pushF1(random, id-1, 3); //Tenta inserir na F1
 
 		if(response == 1) { //Último elemento inserido na fila
 
@@ -270,30 +272,25 @@ void producerF1(int id) {
 }
 
 //Tenta inserir elemento "value" na fila "queue"
-int push (Queue queue, int value, int id, int mod) {
+int pushF1 (int value, int id, int mod) {
     int flagSendSignal;
-    while(queue->bwProd != id);
+    while(F1->bwProd != id);
 
     if (isFull(queue)) {
-        queue->bwProd = -2;
+        F1->bwProd = -2;
         return -1;
     }
 
-    queue->array[queue->lst] = value; 
-    // if (queue == F1) {
-    //     printf("%d insere %d na F1 na posicao: %d\n", getpid(), value, queue->lst);	
-    // } 
-    if (queue == F1) {
-        printf("%d insere %d na F2 na posicao: %d\n", getpid(), value, queue->lst);	
-    }
+    F1->array[F1->lst] = value; 
+    //printf("%d insere %d na F1 na posicao: %d\n", getpid(), value, queue->lst);	
     
-    queue->lst = next(queue->lst);
-    queue->count++;
+    F1->lst = next(F1->lst);
+    F1->count++;
 
     //Caso inserção encheu a fila, flagSendSignal == 1
-    flagSendSignal = isFull(queue); 
+    flagSendSignal = isFull(F1); 
 
-    queue->bwProd = alternationProd(id, mod);
+    F1->bwProd = alternationProd(id, mod);
 	return flagSendSignal;
 }
 
@@ -350,7 +347,7 @@ void* setFlagF1ToConsume() {
 void consumerF1() {
 	int response, value;
 	while(1) {
-		response = popF1(F1, &value);
+		response = popF1(&value);
 		if (response == 0) {
 			
 			if (thread1p4Id == gettid()){
@@ -375,26 +372,21 @@ void setFlagF1ToProduce() {
 }
 
 //Tenta retirar um elemento da fila "queue" e inserir em "value" passado por referência
-int popF1 (Queue queue, int * value) {
-    while(queue->bwCon != gettid());
+int popF1 (int * value) {
+    while(F1->bwCon != gettid());
 
-    if (isEmpty(queue)) {
-        queue->bwCon = thread1p4Id;
+    if (isEmpty(F1)) {
+        F1->bwCon = thread1p4Id;
         return -1;
     }
-    *value = queue->array[queue->fst]; 
+    *value = F1->array[F1->fst]; 
 
-    if (queue == F1) {
-    	printf("%d remove %d da F1\n", getpid(), *value);	
-    } 
-    // else {
-    // 	printf("%d remove %d da F2\n", getpid(), *value);	
-    // }
+    //printf("%d remove %d da F1\n", getpid(), *value);	
     
-    queue->fst = next(queue->fst);
-    queue->count--;
+    F1->fst = next(F1->fst);
+    F1->count--;
 
-    queue->bwProd = alternationCon();
+    F1->bwProd = alternationCon();
 	return 0;
 }
 
@@ -419,7 +411,6 @@ void producerF2(int process) {
 	int value, resp, response;
 
 	while(1) {
-		F2->bwProd = 0;
 		//Se já produziu todos elementos da pipe, encerrar P5 e P6
 		sem_wait((sem_t*)&flagF2->mutex);
 		if (flagF2->flag)  { 
@@ -449,7 +440,8 @@ void producerF2(int process) {
 			}
 			sem_post((sem_t*)&flagF2->mutex);
 			
-			response = push	(F2, value, process-5, 2); //Tento colocar na F2
+			printf("%d\n", process-5);
+			response = pushF2 (value, process-5); //Tento colocar na F2
 			
 			if (response == -1)
 				break;
@@ -464,11 +456,49 @@ void producerF2(int process) {
 	}
 }
 
+//Tenta inserir elemento "value" na fila 2
+int pushF2 (int value, int id) {
+    int flagSendSignal;
+    while(F2->bwProd != id);
+
+    if (isFull(queue)) {
+        F2->bwProd++;
+        return -1;
+    }
+
+    F2->array[F2->lst] = value; 
+    //printf("%d insere %d na F1 na posicao: %d\n", getpid(), value, queue->lst);	
+    
+    F2->lst = next(F2->lst);
+    F2->count++;
+
+    //Caso inserção encheu a fila, flagSendSignal == 1
+    flagSendSignal = isFull(F2); 
+
+    F2->bwProd++;
+	return flagSendSignal;
+}
+
+
+bwProd 
+0,1, 2,3,4
+
+[idthread1, idthread2, idthread3]
+[    0    ,    1     ,    2     ]
+
+
 void* consumerF2() {
 	int value, response;
 	while(1) {
 
-		response = pop(F2, &value);
+		for(int i=0; i<3; i++) {
+			if (gettid() == vet[i]) {
+				response = popF2(&value, i+2);
+				break;
+			}
+		}
+
+		
 
 		if (response == 0) {
 			sem_wait((sem_t*)&flagF2->mutex);
@@ -489,8 +519,8 @@ void* consumerF2() {
 	}
 }
 
-//Tenta retirar um elemento da fila "queue" e inserir em "value" passado por referência
-int pop (Queue queue, int * value) {
+//Tenta retirar um elemento da fila 2 e inserir em "value" passado por referência
+int popF2 (int * value) {
 	sem_wait((sem_t*)&queue->mutex);
 
 	if (isEmpty(queue)) {
