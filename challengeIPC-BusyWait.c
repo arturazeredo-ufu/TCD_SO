@@ -143,7 +143,21 @@ int main () {
 		for (int i = 0; i < 2; i++) 
 	        pthread_create(&tids[i], NULL, consumerF2, NULL);
 	    consumerF2();
+
 	    for (int i = 0; i < 2; ++i) {
+
+		switch (i)
+		{
+			case 0: 
+				thread1p7Id = tids[i];
+			break;
+			case 1: 
+				thread2p7Id = tids[i];
+			break;
+			case 2: 
+				thread3p7Id 5 = tids[i];
+			break;
+		}
 			pthread_join(tids[i], NULL);
 	    }
 	}
