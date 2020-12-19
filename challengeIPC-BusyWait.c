@@ -139,6 +139,8 @@ int main () {
 
 	//P7
 	else if ( id == 7 ){
+		thread1p7Id = gettid();
+
 		pthread_t tids[2];
 		for (int i = 0; i < 2; i++) 
 	        pthread_create(&tids[i], NULL, consumerF2, NULL);
@@ -518,19 +520,6 @@ void* consumerF2() {
 	int value, response;
 	while(1) {
 		response = popF2(&value);
-		//qual thread?
-		switch (i)
-		{
-				case 0: 
-					thread1p7Id = tids[i];
-				break;
-				case 1: 
-					thread2p7Id = tids[i];
-				break;
-				case 2: 
-					thread3p7Id = tids[i];
-				break;
-			}
 
 		if (response == 0) {
 			sem_wait((sem_t*)&flagF2->mutex);
