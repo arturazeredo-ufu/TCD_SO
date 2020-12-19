@@ -20,6 +20,7 @@
 struct queue_t { 
 	sem_t mutex;
     long int bwCon;
+	int bwF2;
 	int fst, lst, count, bwProd; 
 	int array[QUEUE_SZ];
 };
@@ -53,6 +54,11 @@ Queue F2; //Ponteiro para F2 (shared memory)
 int* pids; //Vetor com PIDs de todos os processos [pai,p1,p2,p3,p4,p5,p6,p7] (shared memory)
 long int thread1p4Id; //TID da thread original do P4
 long int thread2p4Id; //TID da thread secundária do P4
+
+long int thread1p7Id; //TID da thread 1 do P7
+long int thread2p7Id; //TID da thread 2 do P7
+long int thread3p7Id; //TID da thread 3 do P7
+
 Flag1 flagF1; //Ponteiro para flag de controle de consumo e produção da F1
 Flag2 flagF2; //Ponteiro para flag de controle de consumo e produção da F2
 int pipe01[2];
@@ -61,6 +67,7 @@ int pipe02[2];
 //Protótipos das funções
 int      alternationProd (int id, int mod);
 long int alternationCon ();
+long int alternationF2 (long int identifier);
 void  	 consumerF1(); 
 void* 	 consumerF2();
 int   	 createChildren();
@@ -458,11 +465,12 @@ void producerF2(int process) {
 
 //Tenta inserir elemento "value" na fila 2
 int pushF2 (int value, int id) {
+
     int flagSendSignal;
-    while(F2->bwProd != id);
+    while(F2->bwF2 != id);
 
     if (isFull(queue)) {
-        F2->bwProd++;
+        F2->bwF2 = alternationF2(getgid());
         return -1;
     }
 
@@ -475,10 +483,36 @@ int pushF2 (int value, int id) {
     //Caso inserção encheu a fila, flagSendSignal == 1
     flagSendSignal = isFull(F2); 
 
-    F2->bwProd++;
+    F2->bwF2 = alternationF2(getgid());
 	return flagSendSignal;
 }
 
+
+long int alternationF2 (long int identifier) {
+
+	switch (identifier)
+	{
+		case thread1p7Id: //thread 1 de P7
+			return thread2p7Id;
+		break;
+
+		case thread2p7Id: //thread 2 de P7
+			return thread3p7Id;
+		break;
+
+		case thread3p7Id: //thread 3 de P7
+			return 5;
+		break;
+
+		case 5: //processo 5
+			return 6;
+		break;
+
+		case 6: //processo 6
+			return thread1p7Id;
+		break;
+	}
+}
 
 bwProd 
 0,1, 2,3,4
@@ -521,10 +555,11 @@ void* consumerF2() {
 
 //Tenta retirar um elemento da fila 2 e inserir em "value" passado por referência
 int popF2 (int * value) {
-	sem_wait((sem_t*)&queue->mutex);
+
+    while(F2->bwF2 != id);
 
 	if (isEmpty(queue)) {
-		sem_post((sem_t*)&queue->mutex);
+		F2->bwF2 = alternationF2(getgid());
 		return -1;
 	}
 
@@ -539,7 +574,7 @@ int popF2 (int * value) {
 	queue->fst = next(queue->fst);
 	queue->count--;
 
-	sem_post((sem_t*)&queue->mutex);
+	F2->bwF2 = alternationF2(getgid());
 	return 0;
 }
 
