@@ -271,7 +271,7 @@ void producerF1(int id) {
 		} 
 		sem_post((sem_t*)&flagF1->mutex);
 
-		random = rand()%INTERVAL; //Gera número aleatório entre 1 e 1000
+		random = (rand()%INTERVAL)+1; //Gera número aleatório entre 1 e 1000
 		response = pushF1(random, id-1, 3); //Tenta inserir na F1
 
 		if(response == 1) { //Último elemento inserido na fila
