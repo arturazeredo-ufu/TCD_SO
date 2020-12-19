@@ -145,19 +145,6 @@ int main () {
 	    consumerF2();
 
 	    for (int i = 0; i < 2; ++i) {
-
-		switch (i)
-		{
-			case 0: 
-				thread1p7Id = tids[i];
-			break;
-			case 1: 
-				thread2p7Id = tids[i];
-			break;
-			case 2: 
-				thread3p7Id 5 = tids[i];
-			break;
-		}
 			pthread_join(tids[i], NULL);
 	    }
 	}
@@ -461,8 +448,7 @@ void producerF2(int process) {
 			}
 			sem_post((sem_t*)&flagF2->mutex);
 			
-			printf("%d\n", process-5);
-			response = pushF2 (value, process-5); //Tento colocar na F2
+			response = pushF2 (value, process); //Tento colocar na F2
 			
 			if (response == -1)
 				break;
@@ -483,8 +469,8 @@ int pushF2 (int value, int id) {
     int flagSendSignal;
     while(F2->bwF2 != id);
 
-    if (isFull(queue)) {
-        F2->bwF2 = alternationF2(getgid());
+    if (isFull(F2)) {
+        F2->bwF2 = alternationF2(id);
         return -1;
     }
 
@@ -497,7 +483,7 @@ int pushF2 (int value, int id) {
     //Caso inserção encheu a fila, flagSendSignal == 1
     flagSendSignal = isFull(F2); 
 
-    F2->bwF2 = alternationF2(getgid());
+    F2->bwF2 = alternationF2(id);
 	return flagSendSignal;
 }
 
@@ -528,25 +514,23 @@ long int alternationF2 (long int identifier) {
 	}
 }
 
-bwProd 
-0,1, 2,3,4
-
-[idthread1, idthread2, idthread3]
-[    0    ,    1     ,    2     ]
-
-
 void* consumerF2() {
 	int value, response;
 	while(1) {
-
-		for(int i=0; i<3; i++) {
-			if (gettid() == vet[i]) {
-				response = popF2(&value, i+2);
+		response = popF2(&value);
+		//qual thread?
+		switch (i)
+		{
+				case 0: 
+					thread1p7Id = tids[i];
+				break;
+				case 1: 
+					thread2p7Id = tids[i];
+				break;
+				case 2: 
+					thread3p7Id = tids[i];
 				break;
 			}
-		}
-
-		
 
 		if (response == 0) {
 			sem_wait((sem_t*)&flagF2->mutex);
@@ -573,7 +557,7 @@ int popF2 (int * value) {
     while(F2->bwF2 != id);
 
 	if (isEmpty(queue)) {
-		F2->bwF2 = alternationF2(getgid());
+		F2->bwF2 = alternationF2(gettid());
 		return -1;
 	}
 
@@ -588,7 +572,7 @@ int popF2 (int * value) {
 	queue->fst = next(queue->fst);
 	queue->count--;
 
-	F2->bwF2 = alternationF2(getgid());
+	F2->bwF2 = alternationF2(gettid());
 	return 0;
 }
 
