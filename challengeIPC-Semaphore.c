@@ -13,7 +13,7 @@
 #define gettid() syscall(SYS_gettid)
 #define QUEUE_SZ 10 //Tamanho das filas (F1 e F2)
 #define PIDS_SZ  8  //Tamanho do vetor com PIDs de todos os processos
-#define AMOUNT_DATA 1000 //Quantidade de elementos que devem ser processados por p7
+#define AMOUNT_DATA 10000 //Quantidade de elementos que devem ser processados por p7
 #define INTERVAL 1000
 
 //Estrutura das filas 1 e 2

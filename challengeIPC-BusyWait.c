@@ -84,7 +84,7 @@ int 	 popF2 (int * value);
 void  	 producerF1();
 void  	 producerF2(int process);
 int   	 pushF1 (int value, int id, int mod);
-int      pushF2 (int value, int id, int mod);
+int      pushF2 (int value, int id);
 void* 	 setFlagF1ToConsume();
 void   	 setFlagF1ToProduce();
 void  	 printResult();
@@ -186,6 +186,7 @@ void createSharedMemory (int type, int sharedMemorySize, int keySM) {
   		initQueue(F1); 
   	} else if (type == 2) {
   		F2 = (Queue) sharedMemory;
+  		F2->bwF2 = 5;
   		initQueue(F2);
   	} else if (type == 3) {
   		pids = (int *) sharedMemory;
@@ -289,13 +290,13 @@ int pushF1 (int value, int id, int mod) {
     int flagSendSignal;
     while(F1->bwProd != id);
 
-    if (isFull(queue)) {
+    if (isFull(F1)) {
         F1->bwProd = -2;
         return -1;
     }
 
     F1->array[F1->lst] = value; 
-    //printf("%d insere %d na F1 na posicao: %d\n", getpid(), value, queue->lst);	
+    // printf("%d insere %d na F1 na posicao: %d\n", getpid(), value, F1->lst);	
     
     F1->lst = next(F1->lst);
     F1->count++;
@@ -394,7 +395,7 @@ int popF1 (int * value) {
     }
     *value = F1->array[F1->fst]; 
 
-    //printf("%d remove %d da F1\n", getpid(), *value);	
+    // printf("%d remove %d da F1\n", getpid(), *value);	
     
     F1->fst = next(F1->fst);
     F1->count--;
@@ -422,7 +423,6 @@ int isEmpty (Queue queue) {
 void producerF2(int process) {
 	
 	int value, resp, response;
-
 	while(1) {
 		//Se já produziu todos elementos da pipe, encerrar P5 e P6
 		sem_wait((sem_t*)&flagF2->mutex);
@@ -434,8 +434,12 @@ void producerF2(int process) {
 
 		if (process == 5) 
 			resp = read(pipe01[0], &value, sizeof(int)); //Tentativa de leitura de pipe01
-		else if (process == 6) 
+		else if (process == 6) {
+
 			resp = read(pipe02[0], &value, sizeof(int)); //Tentativa de leitura de pipe02	
+			printf("to aqui: %d\n", process);
+		}
+		
 		
 		if(resp == -1) {
 			
@@ -470,7 +474,6 @@ void producerF2(int process) {
 
 //Tenta inserir elemento "value" na fila 2
 int pushF2 (int value, int id) {
-
     int flagSendSignal;
     while(F2->bwF2 != id);
 
@@ -480,7 +483,7 @@ int pushF2 (int value, int id) {
     }
 
     F2->array[F2->lst] = value; 
-    //printf("%d insere %d na F1 na posicao: %d\n", getpid(), value, queue->lst);	
+    printf("%d insere %d na F2 na posicao: %d\n", getpid(), value, F2->lst);	
     
     F2->lst = next(F2->lst);
     F2->count++;
@@ -494,29 +497,16 @@ int pushF2 (int value, int id) {
 
 
 long int alternationF2 (long int identifier) {
-
-	switch (identifier)
-	{
-		case thread1p7Id: //thread 1 de P7
-			return thread2p7Id;
-		break;
-
-		case thread2p7Id: //thread 2 de P7
-			return thread3p7Id;
-		break;
-
-		case thread3p7Id: //thread 3 de P7
-			return 5;
-		break;
-
-		case 5: //processo 5
-			return 6;
-		break;
-
-		case 6: //processo 6
-			return thread1p7Id;
-		break;
-	}
+	if (identifier == thread1p7Id)
+		return thread2p7Id;
+	else if (identifier == thread2p7Id)
+		return thread3p7Id;
+	else if (identifier == thread3p7Id)
+		return 5;
+	else if (identifier == 5)
+		return 6;
+	else if (identifier == 6) 
+		return thread1p7Id;
 }
 
 void* consumerF2() {
@@ -546,14 +536,14 @@ void* consumerF2() {
 //Tenta retirar um elemento da fila 2 e inserir em "value" passado por referência
 int popF2 (int * value) {
 
-    while(F2->bwF2 != id);
+    while(F2->bwF2 != gettid());
 
-	if (isEmpty(queue)) {
+	if (isEmpty(F2)) {
 		F2->bwF2 = alternationF2(gettid());
 		return -1;
 	}
 
-	*value = queue->array[queue->fst]; 
+	*value = F2->array[F2->fst]; 
 
 	// if (queue == F1) {
 	// 	printf("%d remove %d da F1\n", getpid(), *value);	
@@ -561,8 +551,8 @@ int popF2 (int * value) {
 	// 	printf("%d remove %d da F2\n", getpid(), *value);	
 	// }
 	
-	queue->fst = next(queue->fst);
-	queue->count--;
+	F2->fst = next(F2->fst);
+	F2->count--;
 
 	F2->bwF2 = alternationF2(gettid());
 	return 0;
