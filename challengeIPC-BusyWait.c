@@ -296,7 +296,7 @@ int pushF1 (int value, int id, int mod) {
     }
 
     F1->array[F1->lst] = value; 
-    // printf("%d insere %d na F1 na posicao: %d\n", getpid(), value, F1->lst);	
+    printf("%d insere %d na F1 na posicao: %d\n", getpid(), value, F1->lst);	
     
     F1->lst = next(F1->lst);
     F1->count++;
@@ -395,7 +395,7 @@ int popF1 (int * value) {
     }
     *value = F1->array[F1->fst]; 
 
-    // printf("%d remove %d da F1\n", getpid(), *value);	
+    printf("%d remove %d da F1\n", getpid(), *value);	
     
     F1->fst = next(F1->fst);
     F1->count--;
