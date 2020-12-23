@@ -34,19 +34,20 @@ struct queue2_t {
 };
 typedef struct queue2_t * Queue2;
 
-struct report {
+struct report_t {
 	sem_t mutex;
 	int counterP5, counterP6; //Quantidade de elementos processados por p5 e p6
 	int counterTotal; //Quantidade de elementos processados por p7
 	int counterEach[INTERVAL+1]; //Elementos processados por p7
 };
-typedef struct report * Report;
+typedef struct report_t * Report;
 
 #define SM_QUEUE1_SZ sizeof(struct queue1_t) 
 #define SM_PIDS_SZ   PIDS_SZ*sizeof(int)
 #define SM_SYNC      sizeof(sem_t)
 
-Queue1 F1; //Ponteiro para estrutura da fila 1 (shared memory)
+Queue1 queue1; //Ponteiro para estrutura da fila 1 (shared memory)
+Queue2 queue2; //Ponteiro para estrutura da fila 2 (shared memory)
 int* pids; //Vetor com PIDs de todos os processos [pai,p1,p2,p3,p4,p5,p6,p7] (shared memory)
 sem_t* syncChildren; //Ponteiro para semáforo para sincronização da criação dos filhos (shared memory)
 long int thread1p4Id; //TID da thread original do P4
@@ -64,6 +65,7 @@ int   next (int position);
 void* p4SignalReceiver();
 int   popF1 (int * value);
 void  producerF1(); 
+void  producerF2(int process);
 int   pushF1 (int value);
 void* setF1ToConsume();
 void  setF1ToProduce();
@@ -76,11 +78,11 @@ int main() {
 	createSharedMemory(2, SM_PIDS_SZ,   random()); //pids
 	createSharedMemory(3, SM_SYNC,      random()); //syncChildren
 
-	//Cria processos filhos
-	int id = createChildren();
-
 	//Inicialização das pipes
 	createPipes();
+
+	//Cria processos filhos
+	int id = createChildren();
 
 	//Processo pai
 	if ( id == 0 ) {
@@ -103,6 +105,10 @@ int main() {
 		pthread_join(thread2, NULL);
 	} 
 
+	//P5, P6
+	else if ( id == 5 || id == 6){
+		producerF2(id);
+	}
 
 	return 0;
 }
@@ -130,8 +136,8 @@ void createSharedMemory (int type, int sharedMemorySize, int keySM) {
   	}
 
   	if (type == 1) {
-  		F1 = (Queue1) sharedMemory;
-  		createSemaphore(&F1->mutex);
+  		queue1 = (Queue1) sharedMemory;
+  		createSemaphore(&queue1->mutex);
   	} else if (type == 2) {
   		pids = (int *) sharedMemory;
   		*(pids) = getpid(); // pids[0] = Pid do processo pai
@@ -147,6 +153,12 @@ void createSemaphore (sem_t * semaphore) {
 		printf("Semaphore creation failed\n");
 		exit(-1);
 	}
+}
+
+//Inicializa ambas pipes do projeto
+void createPipes() {
+	if ( pipe(pipe01) == -1 ){ printf("Erro pipe()"); exit(-1); }
+	if ( pipe(pipe02) == -1 ){ printf("Erro pipe()"); exit(-1); }
 }
 
 //Processo pai cria todos os 7 filhos
@@ -186,20 +198,20 @@ int createChildren() {
 //p1, p2 e p3 produzem elementos aleatórios para F1
 void producerF1() {
 	while(1) {
-		while(F1->toggleAction != 0); //Controle para que não produza quando p4 estiver consumindo
+		while(queue1->toggleAction != 0); //Controle para que não produza quando p4 estiver consumindo
 
 		int response, random;
-		srand(getpid() + F1->lst); //Seed para função random() sempre muda dessa forma
+		srand(getpid() + queue1->lst); //Seed para função random() sempre muda dessa forma
 		while(1) {
 
-			if (F1->toggleAction == 1)
+			if (queue1->toggleAction == 1)
 				break; //Se a fila já estiver sendo consumida, não posso produzir
 
 			random = (rand()%INTERVAL)+1; //Gera número aleatório entre 1 e 1000
 			response = pushF1(random); //Tenta inserir na F1
 
 			if(response == 1) { //Último elemento inserido na fila
-				while(F1->sendSignal != 1); // Espero p4 estar pronto para receber sinal
+				while(queue1->sendSignal != 1); // Espero p4 estar pronto para receber sinal
 				while(kill(*(pids+4), SIGUSR1) == -1); //Tento enviar sinal para p4 consumir até ter sucesso
 				break;
 
@@ -211,22 +223,22 @@ void producerF1() {
 
 //Tenta inserir elemento "value" na fila "queue"
 int pushF1 (int value) {
-	sem_wait((sem_t*)&F1->mutex);
+	sem_wait((sem_t*)&queue1->mutex);
 	
-	if (isFullF1(F1)) {
-		sem_post((sem_t*)&F1->mutex);	
+	if (isFullF1(queue1)) {
+		sem_post((sem_t*)&queue1->mutex);	
 		return -1;
 	}
 
-	F1->F1[F1->lst] = value; 
-	printf("%d insere %d na F1 na posicao: %d\n", getpid(), value, F1->count);	
-	F1->lst = next(F1->lst);
-	F1->count++;
+	queue1->F1[queue1->lst] = value; 
+	// printf("%d insere %d na F1 na posicao: %d\n", getpid(), value, F1->count);	
+	queue1->lst = next(queue1->lst);
+	queue1->count++;
 
 	//Caso inserção encheu a fila, flagSendSignal == 1
-	int flagSendSignal = isFullF1(F1); 
+	int flagSendSignal = isFullF1(queue1); 
 	
-	sem_post((sem_t*)&F1->mutex);
+	sem_post((sem_t*)&queue1->mutex);
 	return flagSendSignal;
 }
 
@@ -245,10 +257,10 @@ void* p4SignalReceiver() {
 	while(1) {
 		if (gettid() == thread1p4Id) {
 			signal(SIGUSR1, (__sighandler_t) setF1ToConsume);
-			F1->sendSignal = 1; //Pronto para receber signal
+			queue1->sendSignal = 1; //Pronto para receber signal
 		}
 
-		while(F1->toggleAction != 1); //Enquanto a fila não estiver pronta para consumo, não fazer nada
+		while(queue1->toggleAction != 1); //Enquanto a fila não estiver pronta para consumo, não fazer nada
 
 		consumerF1();
 		setF1ToProduce();
@@ -257,29 +269,32 @@ void* p4SignalReceiver() {
 
 //Bloqueia produtores de continuarem produzindo ao retirar elementos da F1
 void* setF1ToConsume() {
-	F1->toggleAction = 1; //Não produza mais! F1 pode ser consumida
+	queue1->toggleAction = 1; //Não produza mais! F1 pode ser consumida
 }
 
 //Libera produtores para produzir elementos para F1
 void setF1ToProduce() {
-	F1->toggleAction = 0; //Produza mais! F1 pode não pode ser consumida
+	queue1->toggleAction = 0; //Produza mais! F1 pode não pode ser consumida
 }
 
 //p4 (dualThread) consome F1 e escreve elementos nas pipes
 void consumerF1() {
-	int response, value;
+	int response, value, resp;
 	while(1) {
 		response = popF1(&value);
 		if (response == 0) {
 			
-			if (thread1p4Id == gettid())
-				F1->sendSignal = 0;	
+			if (thread1p4Id == gettid()){
+				queue1->sendSignal = 0;	
+				resp = write(pipe01[1], &value, sizeof(int));
+			} else {
+				resp = write(pipe02[1], &value, sizeof(int));
+			}
 
-				// write(pipe01[1], &value, sizeof(int));
-			// else {
-				// write(pipe02[1], &value, sizeof(int));
-			// }
-
+			if(resp < 0) {
+				printf("Erro na escrita do pipe\n");
+				break;
+			}
 		} else if (response == -1) 
 			break;
 	}
@@ -287,21 +302,21 @@ void consumerF1() {
 
 //Tenta retirar um elemento da fila 1 e inserir em "value" passado por referência
 int popF1 (int * value) {
-	sem_wait((sem_t*)&F1->mutex);
+	sem_wait((sem_t*)&queue1->mutex);
 
-	if (isEmptyF1(F1)) {
-		sem_post((sem_t*)&F1->mutex);
+	if (isEmptyF1(queue1)) {
+		sem_post((sem_t*)&queue1->mutex);
 		return -1;
 	}
 
-	*value = F1->F1[F1->fst]; 
+	*value = queue1->F1[queue1->fst]; 
 
 	// printf("%d remove %d da F1\n", getpid(), *value);	
 	
-	F1->fst = next(F1->fst);
-	F1->count--;
+	queue1->fst = next(queue1->fst);
+	queue1->count--;
 
-	sem_post((sem_t*)&F1->mutex);
+	sem_post((sem_t*)&queue1->mutex);
 	return 0;
 }
 
@@ -310,8 +325,25 @@ int isEmptyF1 (Queue1 queue) {
 	return queue->count == 0;
 }
 
-//Inicializa ambas pipes do projeto
-void createPipes() {
-	if ( pipe(pipe01) == -1 ){ printf("Erro pipe()"); exit(-1); }
-	if ( pipe(pipe02) == -1 ){ printf("Erro pipe()"); exit(-1); }
+
+//Lê elementos das pipes e insere em F2
+void producerF2(int process) {
+	
+	int value, resp, response;
+
+	while(1) {
+		
+		if (process == 5) 
+			resp = read(pipe01[0], &value, sizeof(int)); //Tentativa de leitura de pipe01
+		else if (process == 6) 
+			resp = read(pipe02[0], &value, sizeof(int)); //Tentativa de leitura de pipe02
+		
+		if(resp == -1) {
+			printf("Erro na leitura do pipe0%d\n", process-4);
+			break;
+		} else if (resp > 0) { 
+			printf("retirei %d da pipe\n", value);
+			// response = push(F2, value); //Tento colocar na F2
+		}			
+	}
 }
