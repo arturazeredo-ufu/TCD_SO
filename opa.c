@@ -56,19 +56,24 @@ int pipe01[2];
 int pipe02[2];
 
 void  consumerF1();
+void  consumerF2(int turn);
 int   createChildren();
 void  createPipes();
 void  createSharedMemory (int type, int sharedMemorySize, int keySM);
 void  createSemaphore (sem_t * semaphore);
 int   next (int position);
+int   nextTurn(int turn);
 void* p4SignalReceiver();
 int   popF1 (int * value);
+int   popF2 (int * value, int turn);
 void  producerF1();
 void  producerF2(int process);
 int   pushF1 (int value);
 void  pushF2 (int value, int turn);
 void* setF1ToConsume();
 void  setF1ToProduce();
+void* thread2p7();
+void* thread3p7();
 
 int main() {
 
@@ -109,6 +114,18 @@ int main() {
 	//P5, P6
 	else if ( id == 5 || id == 6){
 		producerF2(id);
+	}
+
+	//P7
+	else if ( id == 7 ){
+		pthread_t tid2, tid3;
+        
+        pthread_create(&tid2, NULL, thread2p7, NULL);
+        pthread_create(&tid3, NULL, thread3p7, NULL);
+	    consumerF2(2);
+
+		pthread_join(tid2, NULL);
+		pthread_join(tid3, NULL);
 	}
 
 	return 0;
@@ -233,6 +250,7 @@ int pushF1 (int value) {
 		return -1;
 	}
 
+	sleep(0.8);
 	queue1->F1[queue1->lst] = value; 
 	// printf("%d insere %d na F1 na posicao: %d\n", getpid(), value, queue1->count);	
 	queue1->lst = next(queue1->lst);
@@ -341,14 +359,71 @@ void producerF2(int process) {
 
 //Tenta inserir elemento "value" na fila "queue"
 void pushF2 (int value, int turn) {
+	while (queue2->turn != turn);
+
+	if (queue2->count == QUEUE_SZ) {
+		queue2->turn = nextTurn(queue2->turn);
+		return;
+	}
 
 	queue2->F2[queue2->lst] = value; 
-	printf("%d insere %d na F2 na posicao: %d\n", getpid(), value, queue2->lst);	
 	queue2->lst = next(queue2->lst);
 	queue2->count++;
 
+	queue2->turn = nextTurn(queue2->turn);
 	return;
 }
 
+int nextTurn(int turn) {
+	return (turn + 1)%5;
+}
 
+void * thread2p7() {
+	consumerF2(3);
+}
 
+void * thread3p7() {
+	consumerF2(4);
+}
+
+void consumerF2(int turn) {
+	int value, response;
+	while(1) {
+
+		popF2(&value, turn);
+
+		if (response == 0) {
+			// sem_wait((sem_t*)&flagF2->mutex);
+			
+			// flagF2->counterTotal++;
+			// printf("%d retirado da F2\n", value);
+
+			// flagF2->counterEach[value]++; //Incrementa 1 na posição correspondente ao elemento aleatório processado por p7
+			
+			// if (flagF2->counterTotal >= AMOUNT_DATA)  { //Se processei quantidade total de elementos que desejo
+			// 	for (int i = 1; i <= 7; ++i) {
+			// 		kill(*(pids+i), SIGTERM) == -1; //Mato todos os filhos e me suicido
+			// 	}
+			// }
+			
+			// sem_post((sem_t*)&flagF2->mutex);
+		}
+	}
+}
+
+//Tenta retirar um elemento da fila 1 e inserir em "value" passado por referência
+int popF2 (int * value, int turn) {
+	while(queue2->turn != turn);
+
+	if (queue2->count == 0) {
+		queue2->turn = nextTurn(queue2->turn);		
+		return -1;
+	}
+
+	*value = queue2->F2[queue2->fst]; 
+	queue2->fst = next(queue2->fst);
+	queue2->count--;
+
+	queue2->turn = nextTurn(queue2->turn);		
+	return 0;
+}
