@@ -253,7 +253,6 @@ int pushF1 (int value) {
 		return -1;
 	}
 
-	sleep(0.8);
 	queue1->F1[queue1->lst] = value; 
 	queue1->lst = next(queue1->lst);
 	queue1->count++;
