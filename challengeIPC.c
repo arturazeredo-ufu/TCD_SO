@@ -388,17 +388,7 @@ int nextTurn(int turn) {
 
 //Calcula qual thread vai processar regiao critica. Aleatorio (busy wait)
 int nextTurn2(int turn) {
-	int random = rand() % 5000;
-	if (random < 1000) 
-		return 0;
-	else if (random >= 1000 && random < 2000)
-		return 1;
-	else if (random >= 2000 && random < 3000)
-		return 2;
-	else if (random >= 3000 && random < 4000)
-		return 3;
-	else if (random >= 4000)
-		return 4;
+	return rand() % 5;
 }
 
 //Define segunda thread como vez 3
