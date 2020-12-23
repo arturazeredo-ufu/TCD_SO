@@ -43,8 +43,9 @@ struct report_t {
 typedef struct report_t * Report;
 
 #define SM_QUEUE1_SZ sizeof(struct queue1_t) 
+#define SM_QUEUE2_SZ sizeof(struct queue2_t) 
 #define SM_PIDS_SZ   PIDS_SZ*sizeof(int)
-#define SM_SYNC      sizeof(sem_t)
+#define SM_SYNC_SZ   sizeof(sem_t)
 
 Queue1 queue1; //Ponteiro para estrutura da fila 1 (shared memory)
 Queue2 queue2; //Ponteiro para estrutura da fila 2 (shared memory)
@@ -59,14 +60,13 @@ int   createChildren();
 void  createPipes();
 void  createSharedMemory (int type, int sharedMemorySize, int keySM);
 void  createSemaphore (sem_t * semaphore);
-int   isEmptyF1 (Queue1 queue);
-int   isFullF1 (Queue1 queue);
 int   next (int position);
 void* p4SignalReceiver();
 int   popF1 (int * value);
-void  producerF1(); 
+void  producerF1();
 void  producerF2(int process);
 int   pushF1 (int value);
+void  pushF2 (int value, int turn);
 void* setF1ToConsume();
 void  setF1ToProduce();
 
@@ -74,9 +74,10 @@ int main() {
 
 	//Criação e inicialização das Shared Memories
 	srand(time(NULL));
-	createSharedMemory(1, SM_QUEUE1_SZ, random()); //F1
+	createSharedMemory(1, SM_QUEUE1_SZ, random()); //queue1
 	createSharedMemory(2, SM_PIDS_SZ,   random()); //pids
-	createSharedMemory(3, SM_SYNC,      random()); //syncChildren
+	createSharedMemory(3, SM_SYNC_SZ,   random()); //syncChildren
+	createSharedMemory(4, SM_QUEUE2_SZ, random()); //queue2
 
 	//Inicialização das pipes
 	createPipes();
@@ -144,6 +145,8 @@ void createSharedMemory (int type, int sharedMemorySize, int keySM) {
   	} else if (type == 3) {
   		syncChildren = (sem_t *) sharedMemory;
   		createSemaphore(syncChildren);
+  	} else if (type == 4) {
+		queue2 = (Queue2) sharedMemory;
   	}
 }
 
@@ -225,26 +228,21 @@ void producerF1() {
 int pushF1 (int value) {
 	sem_wait((sem_t*)&queue1->mutex);
 	
-	if (isFullF1(queue1)) {
+	if (queue1->count == QUEUE_SZ) {
 		sem_post((sem_t*)&queue1->mutex);	
 		return -1;
 	}
 
 	queue1->F1[queue1->lst] = value; 
-	// printf("%d insere %d na F1 na posicao: %d\n", getpid(), value, F1->count);	
+	// printf("%d insere %d na F1 na posicao: %d\n", getpid(), value, queue1->count);	
 	queue1->lst = next(queue1->lst);
 	queue1->count++;
 
 	//Caso inserção encheu a fila, flagSendSignal == 1
-	int flagSendSignal = isFullF1(queue1); 
+	int flagSendSignal = (queue1->count == QUEUE_SZ); 
 	
 	sem_post((sem_t*)&queue1->mutex);
 	return flagSendSignal;
-}
-
-//Verifica se fila está cheia
-int isFullF1 (Queue1 queue) {
-	return queue->count == QUEUE_SZ;
 }
 
 //Calcula próxima posição livre para realizar a inserção 
@@ -304,7 +302,7 @@ void consumerF1() {
 int popF1 (int * value) {
 	sem_wait((sem_t*)&queue1->mutex);
 
-	if (isEmptyF1(queue1)) {
+	if (queue1->count == 0) {
 		sem_post((sem_t*)&queue1->mutex);
 		return -1;
 	}
@@ -319,12 +317,6 @@ int popF1 (int * value) {
 	sem_post((sem_t*)&queue1->mutex);
 	return 0;
 }
-
-//Verifica se fila está vazia
-int isEmptyF1 (Queue1 queue) {
-	return queue->count == 0;
-}
-
 
 //Lê elementos das pipes e insere em F2
 void producerF2(int process) {
@@ -342,8 +334,21 @@ void producerF2(int process) {
 			printf("Erro na leitura do pipe0%d\n", process-4);
 			break;
 		} else if (resp > 0) { 
-			printf("retirei %d da pipe\n", value);
-			// response = push(F2, value); //Tento colocar na F2
+			pushF2(value, process-5); //Tento colocar na F2
 		}			
 	}
 }
+
+//Tenta inserir elemento "value" na fila "queue"
+void pushF2 (int value, int turn) {
+
+	queue2->F2[queue2->lst] = value; 
+	printf("%d insere %d na F2 na posicao: %d\n", getpid(), value, queue2->lst);	
+	queue2->lst = next(queue2->lst);
+	queue2->count++;
+
+	return;
+}
+
+
+
