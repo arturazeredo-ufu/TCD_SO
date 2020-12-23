@@ -34,6 +34,7 @@ struct queue2_t {
 };
 typedef struct queue2_t * Queue2;
 
+//Estrutura do relatório resultante
 struct report_t {
 	sem_t mutex;
 	int counterP5, counterP6; //Quantidade de elementos processados por p5 e p6
@@ -44,13 +45,14 @@ typedef struct report_t * Report;
 
 #define SM_QUEUE1_SZ sizeof(struct queue1_t) 
 #define SM_QUEUE2_SZ sizeof(struct queue2_t) 
+#define SM_REPORT_SZ sizeof(struct report_t) 
 #define SM_PIDS_SZ   PIDS_SZ*sizeof(int)
 #define SM_SYNC_SZ   sizeof(sem_t)
 
 Queue1 queue1; //Ponteiro para estrutura da fila 1 (shared memory)
 Queue2 queue2; //Ponteiro para estrutura da fila 2 (shared memory)
+Report report; //Ponteiro para estrutura do relatório resultante (shared memory)
 int* pids; //Vetor com PIDs de todos os processos [pai,p1,p2,p3,p4,p5,p6,p7] (shared memory)
-sem_t* syncChildren; //Ponteiro para semáforo para sincronização da criação dos filhos (shared memory)
 long int thread1p4Id; //TID da thread original do P4
 int pipe01[2];
 int pipe02[2];
@@ -66,6 +68,7 @@ int   nextTurn(int turn);
 void* p4SignalReceiver();
 int   popF1 (int * value);
 int   popF2 (int * value, int turn);
+void  printResult(double timeSpent);
 void  producerF1();
 void  producerF2(int process);
 int   pushF1 (int value);
@@ -76,13 +79,14 @@ void* thread2p7();
 void* thread3p7();
 
 int main() {
+	clock_t begin = clock();
 
 	//Criação e inicialização das Shared Memories
 	srand(time(NULL));
 	createSharedMemory(1, SM_QUEUE1_SZ, random()); //queue1
 	createSharedMemory(2, SM_PIDS_SZ,   random()); //pids
-	createSharedMemory(3, SM_SYNC_SZ,   random()); //syncChildren
-	createSharedMemory(4, SM_QUEUE2_SZ, random()); //queue2
+	createSharedMemory(3, SM_QUEUE2_SZ, random()); //queue2
+	createSharedMemory(4, SM_REPORT_SZ, random()); //report
 
 	//Inicialização das pipes
 	createPipes();
@@ -92,8 +96,8 @@ int main() {
 
 	//Processo pai
 	if ( id == 0 ) {
-		// clock_t end = clock();
-		// printResult((double)(end - begin) / CLOCKS_PER_SEC);
+		clock_t end = clock();
+		printResult((double)(end - begin) / CLOCKS_PER_SEC);
 	}	
 
 	//P1, P2, P3
@@ -160,10 +164,10 @@ void createSharedMemory (int type, int sharedMemorySize, int keySM) {
   		pids = (int *) sharedMemory;
   		*(pids) = getpid(); // pids[0] = Pid do processo pai
   	} else if (type == 3) {
-  		syncChildren = (sem_t *) sharedMemory;
-  		createSemaphore(syncChildren);
-  	} else if (type == 4) {
 		queue2 = (Queue2) sharedMemory;
+  	} else if (type == 4) {
+		report = (Report) sharedMemory;
+		createSemaphore(&report->mutex);
   	}
 }
 
@@ -186,7 +190,7 @@ int createChildren() {
 	pid_t p;
 	int id;
 
-	sem_wait((sem_t*)&syncChildren); //Pai fecha semáforo
+	sem_wait((sem_t*)&queue1->mutex); //Pai fecha semáforo
 	for(id=1; id<=7; id++){
 		p = fork();
 		
@@ -196,8 +200,7 @@ int createChildren() {
 		}
 		
 		if ( p == 0 ) {
-			sem_wait((sem_t*)&syncChildren); //Filhos aguardam liberação do pai
-			printf("p%d  --> %d\n", id, getpid());
+			sem_wait((sem_t*)&queue1->mutex); //Filhos aguardam liberação do pai
 			return id;
 		}
 
@@ -205,7 +208,7 @@ int createChildren() {
 	}
 
 	for (int i = 0; i < 8; ++i)
-		sem_post((sem_t*)&syncChildren); //Pai libera todos os filhos
+		sem_post((sem_t*)&queue1->mutex); //Pai libera todos os filhos
 
 	for (int i = 0; i < 7; i++)
 		wait(NULL); //Pai espera o p7 encerrar todos os filhos
@@ -221,7 +224,7 @@ void producerF1() {
 		while(queue1->toggleAction != 0); //Controle para que não produza quando p4 estiver consumindo
 
 		int response, random;
-		srand(getpid() + queue1->lst); //Seed para função random() sempre muda dessa forma
+		srand(getpid() + report->counterTotal - queue1->lst); //Seed para função random() sempre muda dessa forma
 		while(1) {
 
 			if (queue1->toggleAction == 1)
@@ -252,7 +255,6 @@ int pushF1 (int value) {
 
 	sleep(0.8);
 	queue1->F1[queue1->lst] = value; 
-	// printf("%d insere %d na F1 na posicao: %d\n", getpid(), value, queue1->count);	
 	queue1->lst = next(queue1->lst);
 	queue1->count++;
 
@@ -326,9 +328,6 @@ int popF1 (int * value) {
 	}
 
 	*value = queue1->F1[queue1->fst]; 
-
-	// printf("%d remove %d da F1\n", getpid(), *value);	
-	
 	queue1->fst = next(queue1->fst);
 	queue1->count--;
 
@@ -342,7 +341,7 @@ void producerF2(int process) {
 	int value, resp, response;
 
 	while(1) {
-		
+
 		if (process == 5) 
 			resp = read(pipe01[0], &value, sizeof(int)); //Tentativa de leitura de pipe01
 		else if (process == 6) 
@@ -351,7 +350,7 @@ void producerF2(int process) {
 		if(resp == -1) {
 			printf("Erro na leitura do pipe0%d\n", process-4);
 			break;
-		} else if (resp > 0) { 
+		} else if (resp > 0) {
 			pushF2(value, process-5); //Tento colocar na F2
 		}			
 	}
@@ -365,6 +364,11 @@ void pushF2 (int value, int turn) {
 		queue2->turn = nextTurn(queue2->turn);
 		return;
 	}
+
+	sem_wait((sem_t*)&report->mutex);
+	if (report->counterTotal < AMOUNT_DATA)
+		(turn == 0) ? report->counterP5++ : report->counterP6++; 
+	sem_post((sem_t*)&report->mutex);
 
 	queue2->F2[queue2->lst] = value; 
 	queue2->lst = next(queue2->lst);
@@ -390,23 +394,19 @@ void consumerF2(int turn) {
 	int value, response;
 	while(1) {
 
-		popF2(&value, turn);
+		response = popF2(&value, turn);
 
 		if (response == 0) {
-			// sem_wait((sem_t*)&flagF2->mutex);
+			sem_wait((sem_t*)&report->mutex);
 			
-			// flagF2->counterTotal++;
-			// printf("%d retirado da F2\n", value);
+			report->counterTotal++;
+			report->counterEach[value]++; //Incrementa 1 na posição correspondente ao elemento aleatório processado por p7
+			if (report->counterTotal >= AMOUNT_DATA) //Se processei quantidade total de elementos que desejo
+				for (int i = 1; i <= 7; ++i)
+					kill(*(pids+i), SIGTERM); //Encerro execução dos processos exceto pai
 
-			// flagF2->counterEach[value]++; //Incrementa 1 na posição correspondente ao elemento aleatório processado por p7
-			
-			// if (flagF2->counterTotal >= AMOUNT_DATA)  { //Se processei quantidade total de elementos que desejo
-			// 	for (int i = 1; i <= 7; ++i) {
-			// 		kill(*(pids+i), SIGTERM) == -1; //Mato todos os filhos e me suicido
-			// 	}
-			// }
-			
-			// sem_post((sem_t*)&flagF2->mutex);
+			printf("Elemento %d retirado de F2\n", value);
+			sem_post((sem_t*)&report->mutex);
 		}
 	}
 }
@@ -426,4 +426,39 @@ int popF2 (int * value, int turn) {
 
 	queue2->turn = nextTurn(queue2->turn);		
 	return 0;
+}
+
+void printResult(double timeSpent) {
+	printf("\na)\n\t*Tempo de execucao do programa: %lf\n", timeSpent);
+
+	printf("\nb)\n\t*Quantidade de valores processados por p5: %d\n", report->counterP5);
+	printf("\t*Quantidade de valores processados por p6: %d\n", report->counterP6);
+	
+	int mode = 0;
+	int higher = report->counterEach[0];
+	for (int i = 0; i <= INTERVAL+1; ++i) {
+		if (higher < report->counterEach[i]) {
+			higher = report->counterEach[i];
+			mode = i;
+		}
+	}
+	printf("\nc)\n\t*Moda: %d\n", mode);
+
+	int min;
+	for (int i = 0; i <= INTERVAL+1; ++i) {
+		if (report->counterEach[i] > 0) {
+			min = i;
+			break;
+		}
+	}
+	printf("\t*Valor minimo: %d\n", min);
+
+	int max;
+	for (int i = INTERVAL+1; i >= 0; --i) {
+		if (report->counterEach[i] > 0) {
+			max = i;
+			break;
+		}
+	}
+	printf("\t*Valor maximo: %d\n", max);
 }
