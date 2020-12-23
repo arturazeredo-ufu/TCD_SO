@@ -65,6 +65,7 @@ void  createSharedMemory (int type, int sharedMemorySize, int keySM);
 void  createSemaphore (sem_t * semaphore);
 int   next (int position);
 int   nextTurn(int turn);
+int   nextTurn2(int turn);
 void* p4SignalReceiver();
 int   popF1 (int * value);
 int   popF2 (int * value, int turn);
@@ -362,7 +363,7 @@ void pushF2 (int value, int turn) {
 	while (queue2->turn != turn); //Aguardo minha vez (busy wait)
 
 	if (queue2->count == QUEUE_SZ) {
-		queue2->turn = nextTurn(queue2->turn); 
+		queue2->turn = nextTurn2(queue2->turn); 
 		return;
 	}
 
@@ -376,13 +377,28 @@ void pushF2 (int value, int turn) {
 	queue2->lst = next(queue2->lst);
 	queue2->count++;
 
-	queue2->turn = nextTurn(queue2->turn);
+	queue2->turn = nextTurn2(queue2->turn);
 	return;
 }
 
-//Calcula qual thread vai processar regiao critica (busy wait)
+//Calcula qual thread vai processar regiao critica. Sequencial (busy wait)
 int nextTurn(int turn) {
 	return (turn + 1)%5; 
+}
+
+//Calcula qual thread vai processar regiao critica. Aleatorio (busy wait)
+int nextTurn2(int turn) {
+	int random = rand() % 5000;
+	if (random < 1000) 
+		return 0;
+	else if (random >= 1000 && random < 2000)
+		return 1;
+	else if (random >= 2000 && random < 3000)
+		return 2;
+	else if (random >= 3000 && random < 4000)
+		return 3;
+	else if (random >= 4000)
+		return 4;
 }
 
 //Define segunda thread como vez 3
@@ -422,7 +438,7 @@ int popF2 (int * value, int turn) {
 	while(queue2->turn != turn); //Espero vez da thread de p7
 
 	if (queue2->count == 0) { //Se fila vazia passo a vez (busy wait)
-		queue2->turn = nextTurn(queue2->turn);		
+		queue2->turn = nextTurn2(queue2->turn);		
 		return -1;
 	}
 
@@ -430,7 +446,7 @@ int popF2 (int * value, int turn) {
 	queue2->fst = next(queue2->fst);
 	queue2->count--;
 
-	queue2->turn = nextTurn(queue2->turn); //Passo a vez
+	queue2->turn = nextTurn2(queue2->turn); //Passo a vez
 	return 0;
 }
 
